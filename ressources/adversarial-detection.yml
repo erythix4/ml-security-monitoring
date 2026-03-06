@@ -1,0 +1,68 @@
+groups:
+  - name: adversarial_input_detection
+    interval: 30s
+    rules:
+
+      # ─── Adversarial Input: high confidence + high reconstruction error ───
+      - alert: PotentialAdversarialInput
+        expr: |
+          ml_input_reconstruction_error > 2.5
+          AND ml_prediction_confidence > 0.95
+        for: 1m
+        labels:
+          severity: critical
+          category: adversarial
+        annotations:
+          summary: "Potential adversarial input detected on {{ $labels.model_name }}"
+          description: |
+            Model {{ $labels.model_name }} (namespace={{ $labels.namespace }}) reports
+            reconstruction_error={{ $value | humanize }} while prediction_confidence > 0.95.
+            This mismatch is a strong indicator of a crafted adversarial example (FGSM / PGD).
+          runbook_url: "https://github.com/erythix4/ml-security-monitoring/wiki/adversarial-input"
+
+      # ─── Out-of-distribution input (embedding distance) ───
+      - alert: OutOfDistributionInput
+        expr: |
+          ml_embedding_distance_to_centroid
+            > 3 * ml_embedding_distance_threshold
+        for: 2m
+        labels:
+          severity: warning
+          category: adversarial
+        annotations:
+          summary: "Out-of-distribution input detected on {{ $labels.model_name }}"
+          description: |
+            Embedding distance {{ $value | humanize }} is > 3× the configured threshold.
+            This may indicate distribution shift, data drift, or an adversarial probe.
+
+      # ─── Prediction instability (small perturbations cause large output swings) ───
+      - alert: PredictionInstabilityHigh
+        expr: |
+          rate(ml_prediction_flip_total[5m]) > 0.1
+        for: 3m
+        labels:
+          severity: warning
+          category: adversarial
+        annotations:
+          summary: "High prediction instability on {{ $labels.model_name }}"
+          description: |
+            More than 10 % of predictions flipped within 5 min — indicative of
+            perturbation-based adversarial attacks or severe input noise.
+
+      # ─── Ensemble disagreement ───
+      - alert: EnsembleDisagreementHigh
+        expr: |
+          ml_ensemble_disagreement_ratio > 0.3
+        for: 2m
+        labels:
+          severity: warning
+          category: adversarial
+        annotations:
+          summary: "Ensemble disagreement spike on {{ $labels.model_name }}"
+          description: |
+            >30 % of ensemble members disagree on the current input batch.
+            May indicate adversarial examples bypassing individual model defenses.
+
+      # ─── Reconstruction error spike (recording rule helper) ───
+      - record: ml_reconstruction_error_5m_avg
+        expr: avg_over_time(ml_input_reconstruction_error[5m])

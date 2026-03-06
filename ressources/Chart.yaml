@@ -1,0 +1,56 @@
+apiVersion: v2
+name: ml-security-stack
+description: |
+  Complete cloud-native ML security monitoring stack.
+  Deploys VictoriaMetrics, Loki, Grafana, Falco, and OTel Collector
+  pre-configured for AI/ML workload security observability.
+  github.com/erythix4/ml-security-monitoring
+
+type: application
+version: 1.0.0
+appVersion: "2026.1"
+
+keywords:
+  - ml-security
+  - ai-observability
+  - falco
+  - victoriametrics
+  - loki
+  - grafana
+  - opentelemetry
+  - kubernetes
+
+home: https://github.com/erythix4/ml-security-monitoring
+sources:
+  - https://github.com/erythix4/ml-security-monitoring
+
+maintainers:
+  - name: Samuel Desseaux
+    email: samuel@erythix.io
+    url: https://erythix.io
+
+dependencies:
+  - name: victoria-metrics-single
+    version: "0.14.x"
+    repository: https://victoriametrics.github.io/helm-charts/
+    condition: victoriametrics.enabled
+
+  - name: loki
+    version: "6.x.x"
+    repository: https://grafana.github.io/helm-charts
+    condition: loki.enabled
+
+  - name: grafana
+    version: "8.x.x"
+    repository: https://grafana.github.io/helm-charts
+    condition: grafana.enabled
+
+  - name: falco
+    version: "4.x.x"
+    repository: https://falcosecurity.github.io/charts
+    condition: falco.enabled
+
+  - name: opentelemetry-collector
+    version: "0.108.x"
+    repository: https://open-telemetry.github.io/opentelemetry-helm-charts
+    condition: otelCollector.enabled

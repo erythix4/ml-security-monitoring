@@ -1,0 +1,24 @@
+# Namespace isolation for ML Security Lab
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ml-serving
+  labels:
+    app.kubernetes.io/part-of: iattack-lab
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    app.kubernetes.io/part-of: iattack-lab
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: security
+  labels:
+    app.kubernetes.io/part-of: iattack-lab

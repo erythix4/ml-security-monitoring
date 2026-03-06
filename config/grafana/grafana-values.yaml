@@ -1,0 +1,36 @@
+adminPassword: llmattacklab
+persistence:
+  enabled: false
+
+resources:
+  requests:
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        uid: PBFA97CFB590B2093
+        url: http://vmsingle-victoria-metrics-single-server:8428
+        isDefault: true
+        editable: true
+
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: configmaps
+        orgId: 1
+        folder: iAttack Lab
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/configmaps
+
+dashboardsConfigMaps:
+  configmaps: grafana-dashboards

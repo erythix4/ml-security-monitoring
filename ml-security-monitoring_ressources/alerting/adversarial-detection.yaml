@@ -1,0 +1,92 @@
+# Adversarial Input Detection Alerts
+# Pattern 1: Detect inputs crafted to fool ML models
+#
+# These rules detect:
+# - High confidence predictions with high reconstruction error
+# - Inputs far from training distribution
+# - Prediction instability under small perturbations
+
+groups:
+  - name: ml_adversarial_detection
+    interval: 30s
+    rules:
+      # Alert: High confidence with high reconstruction error
+      # Rationale: Adversarial inputs often have high model confidence
+      # but don't match the learned data distribution
+      - alert: PotentialAdversarialInput
+        expr: |
+          ml_input_reconstruction_error > 2.5 
+          AND ml_prediction_confidence > 0.95
+        for: 1m
+        labels:
+          severity: warning
+          category: adversarial
+        annotations:
+          summary: "Potential adversarial input detected on {{ $labels.model }}"
+          description: |
+            High reconstruction error ({{ $value }}) with high confidence prediction.
+            This pattern is characteristic of adversarial attacks like FGSM or PGD.
+          runbook_url: "https://github.com/erythix/ml-security-monitoring/docs/runbooks/adversarial.md"
+
+      # Alert: Input far from training distribution
+      # Rationale: Adversarial inputs are often out-of-distribution
+      - alert: OutOfDistributionInput
+        expr: |
+          ml_embedding_distance_to_centroid > 3 * ml_embedding_distance_threshold
+        for: 30s
+        labels:
+          severity: warning
+          category: adversarial
+        annotations:
+          summary: "Out-of-distribution input on {{ $labels.model }}"
+          description: |
+            Input embedding distance ({{ $value }}) exceeds 3x the threshold.
+            May indicate adversarial perturbation or novel attack vector.
+
+      # Alert: Sudden spike in low-stability predictions
+      # Rationale: Adversarial inputs often cause prediction instability
+      - alert: PredictionInstabilitySpike
+        expr: |
+          rate(ml_unstable_predictions_total[5m]) 
+          > 3 * avg_over_time(rate(ml_unstable_predictions_total[5m])[1h:])
+        for: 5m
+        labels:
+          severity: warning
+          category: adversarial
+        annotations:
+          summary: "Prediction instability spike on {{ $labels.model }}"
+          description: |
+            Rate of unstable predictions is 3x above baseline.
+            May indicate coordinated adversarial attack.
+
+      # Alert: High rate of adversarial detections from single source
+      - alert: AdversarialAttackFromSingleSource
+        expr: |
+          sum by (user_id, model) (
+            rate(ml_adversarial_detections_total[10m])
+          ) > 5
+        for: 2m
+        labels:
+          severity: critical
+          category: adversarial
+        annotations:
+          summary: "Possible adversarial attack from user {{ $labels.user_id }}"
+          description: |
+            More than 5 adversarial detections per minute from single user.
+            Consider rate limiting or blocking this source.
+
+      # Alert: Ensemble disagreement spike
+      # Rationale: Adversarial inputs often fool individual models differently
+      - alert: EnsembleDisagreementSpike
+        expr: |
+          ml_ensemble_disagreement_rate > 0.3
+          AND ml_prediction_confidence > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          category: adversarial
+        annotations:
+          summary: "High ensemble disagreement on {{ $labels.model }}"
+          description: |
+            Ensemble models disagree on 30%+ of high-confidence predictions.
+            This pattern suggests adversarial manipulation.

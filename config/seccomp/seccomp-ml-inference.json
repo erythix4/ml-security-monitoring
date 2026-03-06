@@ -1,0 +1,97 @@
+{
+  "_comment": "Custom seccomp profile for ML inference containers",
+  "_aligns_with": "Reinforcement Slide 2: Custom seccomp for GPU ioctls",
+  "_deploy": "Copy to /var/lib/kubelet/seccomp/profiles/ on each node",
+  "defaultAction": "SCMP_ACT_ERRNO",
+  "architectures": [
+    "SCMP_ARCH_X86_64",
+    "SCMP_ARCH_AARCH64"
+  ],
+  "syscalls": [
+    {
+      "names": [
+        "accept", "accept4", "access", "arch_prctl", "bind",
+        "brk", "capget", "capset", "chdir", "clone", "clone3",
+        "close", "connect", "dup", "dup2", "dup3",
+        "epoll_create", "epoll_create1", "epoll_ctl", "epoll_pwait", "epoll_wait",
+        "eventfd", "eventfd2", "execve", "execveat",
+        "exit", "exit_group",
+        "faccessat", "faccessat2", "fadvise64", "fallocate",
+        "fchmod", "fchmodat", "fchown", "fchownat",
+        "fcntl", "fdatasync", "flock",
+        "fstat", "fstatfs", "fsync", "ftruncate",
+        "futex", "futex_waitv",
+        "getcwd", "getdents", "getdents64",
+        "getegid", "geteuid", "getgid",
+        "getgroups", "getpeername", "getpgid", "getpgrp",
+        "getpid", "getppid", "getpriority",
+        "getrandom", "getresgid", "getresuid",
+        "getrlimit", "getrusage",
+        "getsockname", "getsockopt", "gettid", "gettimeofday",
+        "getuid",
+        "listen", "lseek", "lstat",
+        "madvise", "membarrier", "memfd_create",
+        "mincore", "mkdir", "mkdirat",
+        "mlock", "mlock2", "mlockall",
+        "mmap", "mprotect", "mremap", "msync", "munlock", "munlockall", "munmap",
+        "nanosleep", "clock_nanosleep",
+        "newfstatat",
+        "openat", "openat2",
+        "pipe", "pipe2", "poll", "ppoll",
+        "prctl", "pread64", "preadv", "prlimit64",
+        "pselect6", "pwrite64", "pwritev",
+        "read", "readlink", "readlinkat", "readv",
+        "recvfrom", "recvmmsg", "recvmsg",
+        "rename", "renameat", "renameat2",
+        "restart_syscall",
+        "rseq",
+        "rt_sigaction", "rt_sigpending", "rt_sigprocmask",
+        "rt_sigreturn", "rt_sigsuspend", "rt_sigtimedwait",
+        "sched_getaffinity", "sched_getattr", "sched_getparam",
+        "sched_get_priority_max", "sched_get_priority_min",
+        "sched_getscheduler", "sched_setaffinity",
+        "sched_yield",
+        "select",
+        "sendfile", "sendmmsg", "sendmsg", "sendto",
+        "set_robust_list", "set_tid_address",
+        "setgid", "setgroups", "setitimer",
+        "setpgid", "setsid", "setsockopt",
+        "setuid",
+        "shutdown",
+        "sigaltstack",
+        "socket", "socketpair",
+        "splice",
+        "stat", "statfs", "statx",
+        "symlink", "symlinkat",
+        "sysinfo",
+        "tee", "tgkill", "timer_create", "timer_delete",
+        "timer_getoverrun", "timer_gettime", "timer_settime",
+        "timerfd_create", "timerfd_gettime", "timerfd_settime",
+        "times",
+        "umask", "uname", "unlink", "unlinkat",
+        "wait4", "waitid",
+        "write", "writev"
+      ],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "_comment": "GPU ioctl access - required for NVIDIA CUDA operations",
+      "_security_note": "Allows GPU device communication for ML inference",
+      "names": ["ioctl"],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 1,
+          "value": 27,
+          "op": "SCMP_CMP_EQ",
+          "_comment": "FIONREAD - check bytes available"
+        }
+      ]
+    },
+    {
+      "_comment": "Allow ioctl broadly for GPU - can be tightened per driver version",
+      "names": ["ioctl"],
+      "action": "SCMP_ACT_ALLOW"
+    }
+  ]
+}

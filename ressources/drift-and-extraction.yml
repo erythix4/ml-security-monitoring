@@ -1,0 +1,128 @@
+groups:
+  - name: model_drift_monitoring
+    interval: 60s
+    rules:
+
+      # ─── Feature distribution drift (PSI > threshold) ───
+      - alert: FeatureDistributionDrift
+        expr: |
+          ml_feature_psi_score > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          category: drift
+        annotations:
+          summary: "Feature drift detected on {{ $labels.model_name }} / feature={{ $labels.feature_name }}"
+          description: |
+            Population Stability Index (PSI) = {{ $value | humanize }} (threshold 0.2).
+            Significant distribution shift detected. Possible data poisoning or pipeline corruption.
+          runbook_url: "https://github.com/erythix4/ml-security-monitoring/wiki/drift-monitoring"
+
+      # ─── Prediction distribution drift ───
+      - alert: PredictionDistributionDrift
+        expr: |
+          abs(
+            avg_over_time(ml_prediction_label_ratio[1h])
+            - avg_over_time(ml_prediction_label_ratio[24h] offset 24h)
+          ) > 0.15
+        for: 10m
+        labels:
+          severity: warning
+          category: drift
+        annotations:
+          summary: "Prediction label distribution shifted on {{ $labels.model_name }}"
+          description: |
+            Label ratio has shifted >15 % vs. yesterday's baseline.
+            Investigate for concept drift or targeted poisoning.
+
+      # ─── Model accuracy degradation ───
+      - alert: ModelAccuracyDegradation
+        expr: |
+          ml_model_accuracy < ml_model_accuracy_baseline * 0.90
+        for: 15m
+        labels:
+          severity: critical
+          category: drift
+        annotations:
+          summary: "Model accuracy below 90 % of baseline on {{ $labels.model_name }}"
+          description: |
+            Current accuracy={{ $value | humanizePercentage }}, baseline threshold breached.
+            Possible backdoor activation or systematic poisoning.
+
+      # ─── Feature importance sudden change ───
+      - alert: FeatureImportanceAnomaly
+        expr: |
+          abs(ml_feature_importance_score - ml_feature_importance_baseline)
+            / ml_feature_importance_baseline > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          category: drift
+        annotations:
+          summary: "Feature importance anomaly on {{ $labels.model_name }}"
+          description: |
+            Feature {{ $labels.feature_name }} importance changed >50 % from baseline.
+            May indicate backdoor trigger activation or data pipeline issue.
+
+
+  - name: model_extraction_detection
+    interval: 30s
+    rules:
+
+      # ─── API query volume spike (model theft probing) ───
+      - alert: ModelExtractionQuerySpike
+        expr: |
+          rate(ml_api_requests_total[5m])
+            > 5 * avg_over_time(rate(ml_api_requests_total[5m])[1h:5m])
+        for: 2m
+        labels:
+          severity: critical
+          category: extraction
+        annotations:
+          summary: "Potential model extraction: query spike on {{ $labels.model_name }}"
+          description: |
+            Request rate is 5× above the 1-hour moving average.
+            Systematic API probing is a known vector for model extraction attacks.
+          runbook_url: "https://github.com/erythix4/ml-security-monitoring/wiki/model-extraction"
+
+      # ─── Uniform boundary probing (boundary-seeking queries) ───
+      - alert: BoundaryProbingDetected
+        expr: |
+          ml_prediction_confidence_entropy < 0.1
+          AND rate(ml_api_requests_total[5m]) > 10
+        for: 3m
+        labels:
+          severity: critical
+          category: extraction
+        annotations:
+          summary: "Decision boundary probing detected on {{ $labels.model_name }}"
+          description: |
+            Low entropy confidence scores ({{ $value | humanize }}) at high request rate
+            is characteristic of boundary-based model stealing attacks.
+
+      # ─── Single client responsible for >80 % of queries ───
+      - alert: SingleClientDominance
+        expr: |
+          (
+            rate(ml_api_requests_total{client_id!=""}[10m])
+              / ignoring(client_id) group_left
+            sum without(client_id)(rate(ml_api_requests_total[10m]))
+          ) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          category: extraction
+        annotations:
+          summary: "Single client accounts for >80 % of ML API traffic"
+          description: |
+            client_id={{ $labels.client_id }} is responsible for >80 % of requests.
+            Investigate for potential automated extraction tooling.
+
+      # ─── Recording rule: rolling extraction score ───
+      - record: ml_extraction_risk_score
+        expr: |
+          (
+            clamp_max(rate(ml_api_requests_total[5m]) / 10, 1) * 0.5
+            + clamp_max(1 - ml_prediction_confidence_entropy, 1) * 0.3
+            + clamp_max(ml_embedding_distance_to_centroid / ml_embedding_distance_threshold / 3, 1) * 0.2
+          )

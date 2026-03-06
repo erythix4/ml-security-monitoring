@@ -1,0 +1,332 @@
+{
+  "id": null,
+  "uid": "ml-security-k8s",
+  "title": "ML Security Monitoring - iAttack Lab (K8s)",
+  "tags": ["ml-security", "iattack", "kubernetes", "mitre-atlas"],
+  "timezone": "browser",
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 100,
+      "title": "Security Overview (Slide 17: SOC)",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "id": 1,
+      "title": "Risk Score (overall)",
+      "type": "gauge",
+      "gridPos": { "h": 6, "w": 4, "x": 0, "y": 1 },
+      "targets": [{ "expr": "max(security_risk_score{risk_category=\"overall\",job=\"llm-attack-lab\"})", "legendFormat": "" }],
+      "fieldConfig": { "defaults": { "min": 0, "max": 100, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 30 }, { "color": "orange", "value": 60 }, { "color": "red", "value": 70 }] } } }
+    },
+    {
+      "id": 2,
+      "title": "Threat Level",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 3, "x": 4, "y": 1 },
+      "targets": [{ "expr": "security_threat_level{job=\"llm-attack-lab\"}", "legendFormat": "" }],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "orange", "value": 2 }, { "color": "red", "value": 3 }] }, "mappings": [{ "type": "value", "options": { "0": { "text": "NONE" }, "1": { "text": "LOW" }, "2": { "text": "MEDIUM" }, "3": { "text": "HIGH" }, "4": { "text": "CRITICAL" } } }] } }
+    },
+    {
+      "id": 3,
+      "title": "Active Threats",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 3, "x": 7, "y": 1 },
+      "targets": [{ "expr": "active_threats_count{job=\"llm-attack-lab\"}", "legendFormat": "" }],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 3 }] } } }
+    },
+    {
+      "id": 4,
+      "title": "Defense %",
+      "type": "gauge",
+      "gridPos": { "h": 6, "w": 3, "x": 10, "y": 1 },
+      "targets": [{ "expr": "defense_effectiveness{job=\"llm-attack-lab\"}", "legendFormat": "" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 50 }, { "color": "green", "value": 80 }] } } }
+    },
+    {
+      "id": 5,
+      "title": "Attack Success %",
+      "type": "gauge",
+      "gridPos": { "h": 6, "w": 3, "x": 13, "y": 1 },
+      "targets": [{ "expr": "attack_success_rate{job=\"llm-attack-lab\"}", "legendFormat": "" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 10 }, { "color": "red", "value": 25 }] } } }
+    },
+    {
+      "id": 6,
+      "title": "Compromised?",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 3, "x": 16, "y": 1 },
+      "targets": [{ "expr": "llm_compromised_status{job=\"llm-attack-lab\"}", "legendFormat": "" }],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }, "mappings": [{ "type": "value", "options": { "0": { "text": "SAFE" }, "1": { "text": "COMPROMISED" } } }] } }
+    },
+    {
+      "id": 60,
+      "title": "Security Level",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 2, "x": 19, "y": 1 },
+      "targets": [{ "expr": "llm_security_level{job=\"llm-attack-lab\"}", "legendFormat": "" }],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 1 }, { "color": "yellow", "value": 2 }, { "color": "green", "value": 3 }] } } }
+    },
+    {
+      "id": 61,
+      "title": "Session Risk",
+      "type": "gauge",
+      "gridPos": { "h": 6, "w": 3, "x": 21, "y": 1 },
+      "targets": [{ "expr": "session_risk_score{job=\"llm-attack-lab\"}", "legendFormat": "" }],
+      "fieldConfig": { "defaults": { "min": 0, "max": 100, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 40 }, { "color": "orange", "value": 60 }, { "color": "red", "value": 80 }] } } }
+    },
+
+    {
+      "id": 200,
+      "title": "LLM Security — Slide 10: Input Validation (ATLAS AML.T0051, T0044, T0048)",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
+      "collapsed": false
+    },
+    {
+      "id": 7,
+      "title": "Prompt Injection Score (avg + P99)",
+      "description": "Rules: PromptInjectionDetected, PromptInjectionVolumeSpike [AML.T0051]",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "rate(llm_prompt_injection_score_sum{job=\"llm-attack-lab\"}[1m]) / rate(llm_prompt_injection_score_count{job=\"llm-attack-lab\"}[1m])", "legendFormat": "avg score" },
+        { "expr": "histogram_quantile(0.95, rate(llm_prompt_injection_score_bucket{job=\"llm-attack-lab\"}[5m]))", "legendFormat": "P95" },
+        { "expr": "histogram_quantile(0.99, rate(llm_prompt_injection_score_bucket{job=\"llm-attack-lab\"}[5m]))", "legendFormat": "P99" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "thresholdsStyle": { "mode": "line" } }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 0.85 }] } } }
+    },
+    {
+      "id": 8,
+      "title": "System Prompt Similarity",
+      "description": "Rule: SystemPromptExtractionAttempt [AML.T0044]",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "targets": [
+        { "expr": "rate(llm_prompt_similarity_to_system_sum{job=\"llm-attack-lab\"}[1m]) / rate(llm_prompt_similarity_to_system_count{job=\"llm-attack-lab\"}[1m])", "legendFormat": "avg similarity" },
+        { "expr": "histogram_quantile(0.95, rate(llm_prompt_similarity_to_system_bucket{job=\"llm-attack-lab\"}[5m]))", "legendFormat": "P95" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "thresholdsStyle": { "mode": "line" } }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 0.9 }] } } }
+    },
+    {
+      "id": 9,
+      "title": "Policy Violations, Tool Calls & Jailbreaks",
+      "description": "Rules: OutputPolicyViolation, SuspiciousToolUsage [AML.T0048], JailbreakSuccessRate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "targets": [
+        { "expr": "rate(llm_output_policy_violations_total{job=\"llm-attack-lab\"}[5m]) * 60", "legendFormat": "policy violations/min" },
+        { "expr": "rate(llm_tool_calls_total{job=\"llm-attack-lab\"}[5m]) * 60", "legendFormat": "tool:{{tool}} /min" },
+        { "expr": "rate(llm_attacks_total{attack_type=\"jailbreak\",success=\"true\",job=\"llm-attack-lab\"}[5m]) / (rate(llm_attacks_total{attack_type=\"jailbreak\",job=\"llm-attack-lab\"}[5m]) > 0)", "legendFormat": "jailbreak success rate" }
+      ]
+    },
+
+    {
+      "id": 300,
+      "title": "Adversarial Detection — Slide 11: Anomaly Detection (ATLAS AML.T0043)",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+      "collapsed": false
+    },
+    {
+      "id": 10,
+      "title": "Reconstruction Error (avg + P95)",
+      "description": "Rules: PotentialAdversarialInput, ReconstructionErrorSpike [AML.T0043]",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 17 },
+      "targets": [
+        { "expr": "rate(ml_input_reconstruction_error_sum{job=\"llm-attack-lab\"}[1m]) / rate(ml_input_reconstruction_error_count{job=\"llm-attack-lab\"}[1m])", "legendFormat": "avg recon_error" },
+        { "expr": "histogram_quantile(0.95, rate(ml_input_reconstruction_error_bucket{job=\"llm-attack-lab\"}[5m]))", "legendFormat": "P95 recon_error" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "thresholdsStyle": { "mode": "line" } }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 2.5 }] } } }
+    },
+    {
+      "id": 11,
+      "title": "Prediction Confidence (avg + P95)",
+      "description": "Rule: PotentialAdversarialInput — high confidence + high error = adversarial [AML.T0043]",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 17 },
+      "targets": [
+        { "expr": "rate(ml_prediction_confidence_sum{job=\"llm-attack-lab\"}[1m]) / rate(ml_prediction_confidence_count{job=\"llm-attack-lab\"}[1m])", "legendFormat": "avg confidence" },
+        { "expr": "histogram_quantile(0.95, rate(ml_prediction_confidence_bucket{job=\"llm-attack-lab\"}[5m]))", "legendFormat": "P95 confidence" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "thresholdsStyle": { "mode": "line" } }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 0.95 }] } } }
+    },
+    {
+      "id": 12,
+      "title": "Embedding Distance to Centroid",
+      "description": "Rules: OutOfDistributionInput [AML.T0043]",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 17 },
+      "targets": [
+        { "expr": "rate(ml_embedding_distance_to_centroid_sum{job=\"llm-attack-lab\"}[1m]) / rate(ml_embedding_distance_to_centroid_count{job=\"llm-attack-lab\"}[1m])", "legendFormat": "avg distance" },
+        { "expr": "histogram_quantile(0.95, rate(ml_embedding_distance_to_centroid_bucket{job=\"llm-attack-lab\"}[5m]))", "legendFormat": "P95 distance" },
+        { "expr": "ml_embedding_distance_threshold{job=\"llm-attack-lab\"}", "legendFormat": "threshold" }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Prediction Stability & Unstable Count",
+      "description": "Rule: PredictionInstability [AML.T0043]",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 25 },
+      "targets": [
+        { "expr": "ml_prediction_stability_score{job=\"llm-attack-lab\"}", "legendFormat": "stability score" },
+        { "expr": "rate(ml_unstable_predictions_total{job=\"llm-attack-lab\"}[5m])", "legendFormat": "unstable/s" }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "Suspicious Patterns Detected",
+      "description": "Rule: SuspiciousPatternsSurge [AML.T0043]",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 25 },
+      "targets": [
+        { "expr": "rate(suspicious_patterns_detected_total{job=\"llm-attack-lab\"}[5m]) * 60", "legendFormat": "patterns/min" }
+      ]
+    },
+    {
+      "id": 62,
+      "title": "Tokens Analyzed Rate",
+      "description": "Rule: TokenAnalysisVolumeAnomaly [AML.T0040]",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 25 },
+      "targets": [
+        { "expr": "rate(tokens_analyzed_total{job=\"llm-attack-lab\"}[5m]) * 60", "legendFormat": "tokens/min" },
+        { "expr": "rate(tokens_analyzed_total{job=\"llm-attack-lab\"}[1h]) * 60", "legendFormat": "baseline tokens/min (1h avg)" }
+      ]
+    },
+
+    {
+      "id": 400,
+      "title": "Model Behavior — Slide 12: Drift, Extraction, Poisoning (ATLAS AML.T0031, T0024, T0020, T0018)",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 33 },
+      "collapsed": false
+    },
+    {
+      "id": 15,
+      "title": "PSI Distribution Drift",
+      "description": "Rule: ModelDistributionDrift [AML.T0031]",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 34 },
+      "targets": [{ "expr": "ml_prediction_distribution_psi{job=\"llm-attack-lab\"}", "legendFormat": "PSI {{model_name}}" }],
+      "fieldConfig": { "defaults": { "custom": { "thresholdsStyle": { "mode": "line" } }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.1 }, { "color": "red", "value": 0.2 }] } } }
+    },
+    {
+      "id": 16,
+      "title": "API Query Rate per IP (Extraction)",
+      "description": "Rules: ModelExtractionAttempt, ModelExtractionLowEntropy [AML.T0024]",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 34 },
+      "targets": [
+        { "expr": "rate(ml_api_queries_total{job=\"llm-attack-lab\"}[5m]) * 60", "legendFormat": "{{source_ip}}" }
+      ]
+    },
+    {
+      "id": 17,
+      "title": "Accuracy vs Baseline",
+      "description": "Rule: AccuracyDegradation [AML.T0031]",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 34 },
+      "targets": [
+        { "expr": "ml_accuracy_by_class{job=\"llm-attack-lab\"}", "legendFormat": "accuracy {{class}}" },
+        { "expr": "ml_baseline_accuracy{job=\"llm-attack-lab\"}", "legendFormat": "baseline" },
+        { "expr": "ml_baseline_accuracy{job=\"llm-attack-lab\"} * 0.8", "legendFormat": "80% threshold" }
+      ]
+    },
+    {
+      "id": 63,
+      "title": "Confidence Deviation & Class Balance",
+      "description": "Rules: ModelConfidenceAnomaly [AML.T0018], PredictionClassImbalance [AML.T0020]",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 34 },
+      "targets": [
+        { "expr": "model_confidence_deviation{job=\"llm-attack-lab\"}", "legendFormat": "confidence deviation" },
+        { "expr": "rate(ml_predictions_by_class_total{job=\"llm-attack-lab\"}[5m])", "legendFormat": "class: {{predicted_class}}" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "thresholdsStyle": { "mode": "line" } }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 0.3 }] } } }
+    },
+
+    {
+      "id": 500,
+      "title": "Attacks & Defense Performance (Slides 10-12, 17)",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 },
+      "collapsed": false
+    },
+    {
+      "id": 18,
+      "title": "Attacks by Type & Outcome",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 43 },
+      "targets": [
+        { "expr": "rate(llm_attacks_total{detected=\"true\",success=\"true\",job=\"llm-attack-lab\"}[5m])", "legendFormat": "{{attack_type}} success" },
+        { "expr": "rate(llm_attacks_total{detected=\"true\",success=\"false\",job=\"llm-attack-lab\"}[5m])", "legendFormat": "{{attack_type}} blocked" }
+      ]
+    },
+    {
+      "id": 19,
+      "title": "Defense Actions & Blocked",
+      "description": "Rules: DefenseEffectivenessLow [AML.T0031]",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 43 },
+      "targets": [
+        { "expr": "rate(llm_defense_actions_total{job=\"llm-attack-lab\"}[5m]) * 60", "legendFormat": "{{action_type}}" },
+        { "expr": "rate(blocked_attacks_total{job=\"llm-attack-lab\"}[5m]) * 60", "legendFormat": "blocked/min" }
+      ]
+    },
+    {
+      "id": 64,
+      "title": "Defense Response Time (P50/P95)",
+      "description": "Rule: DefenseResponseTimeSlow",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 43 },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, rate(defense_response_time_seconds_bucket{job=\"llm-attack-lab\"}[5m]))", "legendFormat": "P50" },
+        { "expr": "histogram_quantile(0.95, rate(defense_response_time_seconds_bucket{job=\"llm-attack-lab\"}[5m]))", "legendFormat": "P95" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "thresholdsStyle": { "mode": "line" } }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 2.0 }] } } }
+    },
+    {
+      "id": 20,
+      "title": "Request Latency (P50/P95/P99)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 51 },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, rate(llm_request_latency_seconds_bucket{job=\"llm-attack-lab\"}[5m]))", "legendFormat": "P50" },
+        { "expr": "histogram_quantile(0.95, rate(llm_request_latency_seconds_bucket{job=\"llm-attack-lab\"}[5m]))", "legendFormat": "P95" },
+        { "expr": "histogram_quantile(0.99, rate(llm_request_latency_seconds_bucket{job=\"llm-attack-lab\"}[5m]))", "legendFormat": "P99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 21,
+      "title": "Attack Rate & Security Alerts",
+      "description": "Rules: HighAttackRate [AML.T0040], SecurityLevelDegraded",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 51 },
+      "targets": [
+        { "expr": "attack_attempts_per_minute{job=\"llm-attack-lab\"}", "legendFormat": "attacks/min" },
+        { "expr": "rate(security_alerts_total{job=\"llm-attack-lab\"}[5m]) * 60", "legendFormat": "alerts: {{severity}}" }
+      ]
+    },
+    {
+      "id": 22,
+      "title": "Risk Breakdown by Category",
+      "description": "Rule: HighSecurityRiskScore [AML.T0040]",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 51 },
+      "targets": [
+        { "expr": "security_risk_score{job=\"llm-attack-lab\"}", "legendFormat": "{{model_name}} / {{risk_category}}" }
+      ]
+    }
+  ],
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "schemaVersion": 39,
+  "version": 3
+}

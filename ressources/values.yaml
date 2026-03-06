@@ -1,0 +1,392 @@
+# =============================================================================
+# ml-security-stack — Helm Values
+# github.com/erythix4/ml-security-monitoring
+# Samuel Desseaux · Erythix / Aureonis · Apache 2.0
+# =============================================================================
+
+# Global settings
+global:
+  # Namespace where all components are deployed
+  namespace: ml-security
+
+  # Labels applied to all resources
+  commonLabels:
+    app.kubernetes.io/part-of: ml-security-monitoring
+    managed-by: erythix
+
+# =============================================================================
+# VictoriaMetrics — Long-term metrics storage
+# =============================================================================
+victoriametrics:
+  enabled: true
+
+  victoria-metrics-single:
+    server:
+      retentionPeriod: "90d"
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: 2
+          memory: 4Gi
+      persistentVolume:
+        enabled: true
+        size: 50Gi
+        storageClass: ""   # Set to your preferred storage class
+
+      # vmalert for PromQL-based ML alerting rules
+      vmalert:
+        enabled: true
+        configMap: ml-alerting-rules
+        notifier:
+          url: "http://alertmanager:9093"
+
+    # Scrape configs for ML workloads
+    scrape_configs:
+      - job_name: "ml-inference-pods"
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: []   # Empty = all namespaces; restrict as needed
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_ml_monitoring]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: app
+          - source_labels: [__meta_kubernetes_pod_label_model_name]
+            target_label: model_name
+
+# =============================================================================
+# Loki — Log aggregation for ML security events
+# =============================================================================
+loki:
+  enabled: true
+
+  loki:
+    auth_enabled: false
+    commonConfig:
+      replication_factor: 1
+
+    storage:
+      type: filesystem
+
+    limits_config:
+      retention_period: 720h    # 30 days
+      ingestion_rate_mb: 16
+      ingestion_burst_size_mb: 32
+      max_streams_per_user: 10000
+
+    # Schema for structured log querying
+    schema_config:
+      configs:
+        - from: "2024-01-01"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: index_
+            period: 24h
+
+  # Labels to extract from ML pod logs
+  extraArgs:
+    - --store.max-look-back-period=720h
+
+  promtail:
+    enabled: true
+    config:
+      snippets:
+        extraScrapeConfigs: |
+          - job_name: ml-pods
+            kubernetes_sd_configs:
+              - role: pod
+            relabel_configs:
+              - source_labels: [__meta_kubernetes_pod_label_ml_monitoring]
+                action: keep
+                regex: "true"
+              - source_labels: [__meta_kubernetes_pod_label_model_name]
+                target_label: model_name
+              - source_labels: [__meta_kubernetes_namespace]
+                target_label: namespace
+              - source_labels: [__meta_kubernetes_pod_name]
+                target_label: pod
+            pipeline_stages:
+              - json:
+                  expressions:
+                    level: level
+                    model_name: model_name
+                    session_id: session_id
+                    threat_type: threat_type
+                    score: score
+              - labels:
+                  level:
+                  model_name:
+                  threat_type:
+
+# =============================================================================
+# Grafana — Dashboards
+# =============================================================================
+grafana:
+  enabled: true
+
+  adminPassword: "changeme-use-secret-in-production"
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: VictoriaMetrics
+          type: prometheus
+          url: http://ml-security-victoria-metrics-single-server:8428
+          isDefault: true
+          jsonData:
+            httpMethod: POST
+
+        - name: Loki
+          type: loki
+          url: http://ml-security-loki:3100
+          jsonData:
+            maxLines: 1000
+
+  # Pre-install dashboards via ConfigMaps
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: "ml-security"
+          orgId: 1
+          folder: "ML Security"
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/ml-security
+
+  dashboardsConfigMaps:
+    ml-security: "ml-grafana-dashboards"
+
+  grafana.ini:
+    server:
+      root_url: "%(protocol)s://%(domain)s/grafana"
+    security:
+      allow_embedding: true
+    unified_alerting:
+      enabled: true
+
+# =============================================================================
+# Falco — Runtime threat detection
+# =============================================================================
+falco:
+  enabled: true
+
+  # Enable eBPF driver (recommended for modern kernels)
+  driver:
+    kind: ebpf
+
+  # Load custom ML security rules
+  customRules:
+    ml-security-rules.yaml: |
+      # Loaded from falco/ml-security-rules.yaml
+      # See full content in the repository
+      # mount this file via extraVolumes or use the ConfigMap approach below
+
+  falco:
+    rules_files:
+      - /etc/falco/falco_rules.yaml
+      - /etc/falco/falco_rules.local.yaml
+      - /etc/falco/ml-security-rules.yaml
+
+    # Send Falco alerts to Loki via HTTP
+    json_output: true
+    json_include_output_property: true
+    http_output:
+      enabled: true
+      url: "http://ml-security-loki:3100/loki/api/v1/push"
+
+  # Falcosidekick for alert routing
+  falcosidekick:
+    enabled: true
+    config:
+      loki:
+        hostport: "http://ml-security-loki:3100"
+        minimumpriority: "warning"
+      alertmanager:
+        hostport: "http://alertmanager:9093"
+        minimumpriority: "critical"
+
+  # Extra volume for custom rules ConfigMap
+  extraVolumes:
+    - name: ml-custom-rules
+      configMap:
+        name: falco-ml-security-rules
+
+  extraVolumeMounts:
+    - name: ml-custom-rules
+      mountPath: /etc/falco/ml-security-rules.yaml
+      subPath: ml-security-rules.yaml
+
+# =============================================================================
+# OpenTelemetry Collector — Traces, metrics, logs from ML workloads
+# =============================================================================
+otelCollector:
+  enabled: true
+
+  opentelemetry-collector:
+    mode: daemonset
+
+    config:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: "0.0.0.0:4317"
+            http:
+              endpoint: "0.0.0.0:4318"
+
+        # Prometheus receiver to scrape ML pods
+        prometheus:
+          config:
+            scrape_configs:
+              - job_name: "otel-ml-scrape"
+                kubernetes_sd_configs:
+                  - role: pod
+                relabel_configs:
+                  - source_labels: [__meta_kubernetes_pod_label_ml_monitoring]
+                    action: keep
+                    regex: "true"
+
+      processors:
+        batch:
+          timeout: 10s
+          send_batch_size: 1000
+        memory_limiter:
+          limit_mib: 512
+        resource:
+          attributes:
+            - key: cluster.name
+              value: "${CLUSTER_NAME}"
+              action: upsert
+
+        # Filter and tag ML security-relevant spans
+        filter/ml_security:
+          traces:
+            span:
+              - 'attributes["ml.threat_detected"] == true'
+
+        attributes/ml_labels:
+          actions:
+            - key: ml.monitoring
+              value: "true"
+              action: insert
+
+      exporters:
+        prometheusremotewrite:
+          endpoint: "http://ml-security-victoria-metrics-single-server:8428/api/v1/write"
+          tls:
+            insecure: true
+
+        loki:
+          endpoint: "http://ml-security-loki:3100/loki/api/v1/push"
+          labels:
+            resource:
+              k8s.namespace.name: ""
+              k8s.pod.name: ""
+              ml.model_name: ""
+              ml.threat_type: ""
+
+      service:
+        pipelines:
+          metrics:
+            receivers: [otlp, prometheus]
+            processors: [memory_limiter, batch, resource, attributes/ml_labels]
+            exporters: [prometheusremotewrite]
+          logs:
+            receivers: [otlp]
+            processors: [memory_limiter, batch, resource]
+            exporters: [loki]
+          traces:
+            receivers: [otlp]
+            processors: [memory_limiter, batch, filter/ml_security, attributes/ml_labels]
+            exporters: [prometheusremotewrite]
+
+# =============================================================================
+# Alertmanager — Alert routing
+# =============================================================================
+alertmanager:
+  enabled: true
+
+  config:
+    global:
+      resolve_timeout: 5m
+
+    route:
+      group_by: ["alertname", "namespace", "model_name"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: "default"
+      routes:
+        - match:
+            severity: critical
+          receiver: "critical-slack"
+          continue: true
+        - match:
+            category: llm_security
+          receiver: "llm-security-team"
+        - match:
+            category: model_theft
+          receiver: "soc-team"
+
+    receivers:
+      - name: "default"
+        webhook_configs:
+          - url: "http://alertmanager-webhook:5001/"
+
+      - name: "critical-slack"
+        slack_configs:
+          - api_url: "${SLACK_WEBHOOK_URL}"
+            channel: "#ml-security-alerts"
+            title: "🚨 ML Security Alert: {{ .GroupLabels.alertname }}"
+            text: |
+              *Model:* {{ .CommonLabels.model_name }}
+              *Namespace:* {{ .CommonLabels.namespace }}
+              *Severity:* {{ .CommonLabels.severity }}
+              {{ range .Alerts }}*Description:* {{ .Annotations.description }}{{ end }}
+
+      - name: "llm-security-team"
+        email_configs:
+          - to: "llm-security@example.com"
+            from: "alertmanager@example.com"
+            smarthost: "smtp.example.com:587"
+            subject: "[LLM Security] {{ .GroupLabels.alertname }}"
+
+      - name: "soc-team"
+        email_configs:
+          - to: "soc@example.com"
+            from: "alertmanager@example.com"
+            smarthost: "smtp.example.com:587"
+            subject: "[SOC] ML Model Threat: {{ .GroupLabels.alertname }}"
+
+    inhibit_rules:
+      - source_match:
+          severity: "critical"
+        target_match:
+          severity: "warning"
+        equal: ["alertname", "model_name"]

@@ -1,0 +1,171 @@
+# Falco Rules for AI/ML Workloads
+# Aligns with: Slide 14 (Falco Runtime Security), Reinforcement Slide 2 (Runtime Hardening)
+# Deploy: helm install falco falcosecurity/falco --set-file customRules."falco_ml_rules\.yaml"=config/falco/falco_ml_rules.yaml
+
+# ─── Model File Exfiltration ─────────────────────────────────────────────────
+- rule: Model File Exfiltration Attempt
+  desc: >
+    Detect read access to ML model files (.pt, .onnx, .safetensors, .pkl, .h5)
+    in inference containers. Could indicate model theft or unauthorized access.
+  condition: >
+    open_read and container
+    and (fd.name endswith ".pt"
+      or fd.name endswith ".pth"
+      or fd.name endswith ".onnx"
+      or fd.name endswith ".safetensors"
+      or fd.name endswith ".pkl"
+      or fd.name endswith ".h5"
+      or fd.name endswith ".bin")
+    and not proc.name in (python, python3, gunicorn, uvicorn, tritonserver)
+  output: >
+    Model file read by unexpected process
+    (file=%fd.name proc=%proc.name pod=%k8s.pod.name ns=%k8s.ns.name
+     user=%user.name container=%container.name image=%container.image.repository)
+  priority: WARNING
+  tags: [ml-security, model-theft, mitre_exfiltration]
+
+# ─── Shell Access in ML Containers ───────────────────────────────────────────
+- rule: Shell Spawned in ML Serving Container
+  desc: >
+    Detect shell access in inference containers (ml-serving namespace).
+    Inference pods should never have interactive shells. Indicates compromise.
+  condition: >
+    spawned_process
+    and container
+    and proc.name in (bash, sh, zsh, dash, ash, csh, ksh, fish)
+    and k8s.ns.name = "ml-serving"
+  output: >
+    Shell spawned in ML serving container
+    (proc=%proc.name pod=%k8s.pod.name ns=%k8s.ns.name
+     parent=%proc.pname container=%container.name
+     image=%container.image.repository cmdline=%proc.cmdline)
+  priority: CRITICAL
+  tags: [ml-security, runtime-compromise, mitre_execution]
+
+# ─── GPU Driver Access Monitoring ────────────────────────────────────────────
+# Reinforcement Slide 2: NVIDIA CTK security (CVE-2024-0132)
+- rule: Suspicious GPU Driver Access
+  desc: >
+    Monitor access to NVIDIA GPU device files outside normal inference patterns.
+    Detects potential GPU escape attempts (CVE-2024-0132).
+  condition: >
+    open_read and container
+    and (fd.name startswith "/dev/nvidia"
+      or fd.name startswith "/dev/dri")
+    and not proc.name in (python, python3, tritonserver, vllm, nvidia-smi)
+    and k8s.ns.name = "ml-serving"
+  output: >
+    Suspicious GPU driver access
+    (file=%fd.name proc=%proc.name pod=%k8s.pod.name
+     ns=%k8s.ns.name cmdline=%proc.cmdline)
+  priority: CRITICAL
+  tags: [ml-security, gpu-escape, cve-2024-0132, mitre_privilege_escalation]
+
+# ─── Network Connection from ML Pod ──────────────────────────────────────────
+- rule: Outbound Connection from ML Inference Pod
+  desc: >
+    Detect unexpected outbound network connections from inference pods.
+    ML serving pods should only connect to monitoring and internal services.
+  condition: >
+    evt.type in (connect, sendto)
+    and container
+    and fd.typechar = '4'
+    and fd.net != "127.0.0.0/8"
+    and k8s.ns.name = "ml-serving"
+    and not fd.snet in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+  output: >
+    Outbound connection from ML inference pod
+    (fd=%fd.name proc=%proc.name pod=%k8s.pod.name
+     ns=%k8s.ns.name dest=%fd.sip:%fd.sport)
+  priority: WARNING
+  tags: [ml-security, data-exfiltration, mitre_exfiltration]
+
+# ─── Model File Modification ─────────────────────────────────────────────────
+- rule: Model File Modified at Runtime
+  desc: >
+    Detect modification of model files in running containers.
+    Models should be immutable at runtime (read-only mounts).
+    Modification indicates data poisoning or tampering.
+  condition: >
+    (evt.type in (open, openat) and evt.arg.flags contains O_WRONLY)
+    and container
+    and (fd.name endswith ".pt"
+      or fd.name endswith ".onnx"
+      or fd.name endswith ".safetensors"
+      or fd.name endswith ".pkl")
+    and k8s.ns.name = "ml-serving"
+  output: >
+    Model file modified at runtime (CRITICAL - possible poisoning)
+    (file=%fd.name proc=%proc.name pod=%k8s.pod.name
+     ns=%k8s.ns.name user=%user.name)
+  priority: CRITICAL
+  tags: [ml-security, data-poisoning, model-tampering, mitre_impact]
+
+# ─── Suspicious Tool Execution ───────────────────────────────────────────────
+- rule: Suspicious Tool in ML Container
+  desc: >
+    Detect execution of tools commonly used for reconnaissance or exfiltration
+    in ML inference containers.
+  condition: >
+    spawned_process
+    and container
+    and proc.name in (curl, wget, nc, ncat, netcat, nmap, ssh, scp, rsync, git)
+    and k8s.ns.name = "ml-serving"
+  output: >
+    Suspicious tool executed in ML container
+    (proc=%proc.name pod=%k8s.pod.name ns=%k8s.ns.name
+     cmdline=%proc.cmdline parent=%proc.pname)
+  priority: CRITICAL
+  tags: [ml-security, reconnaissance, mitre_discovery]
+
+# ─── Crypto Mining Detection via GPU ─────────────────────────────────────────
+# Reinforcement Slide 5: GPU-aware observability
+- rule: Potential Crypto Mining in ML Pod
+  desc: >
+    Detect processes commonly associated with crypto mining in GPU-enabled pods.
+    Cross-reference with DCGM metrics for GPU utilization anomalies.
+  condition: >
+    spawned_process
+    and container
+    and (proc.name in (xmrig, ethminer, ccminer, nbminer, t-rex, lolminer)
+      or proc.cmdline contains "stratum+tcp"
+      or proc.cmdline contains "mining"
+      or proc.cmdline contains "--algo")
+    and k8s.ns.name = "ml-serving"
+  output: >
+    Potential crypto mining detected in ML pod
+    (proc=%proc.name pod=%k8s.pod.name ns=%k8s.ns.name
+     cmdline=%proc.cmdline image=%container.image.repository)
+  priority: EMERGENCY
+  tags: [ml-security, cryptomining, mitre_resource_hijacking]
+
+# ─── System Prompt File Access ───────────────────────────────────────────────
+- rule: System Prompt File Access
+  desc: >
+    Detect access to system prompt configuration files.
+    Could indicate system prompt extraction attempt.
+  condition: >
+    open_read and container
+    and (fd.name contains "system_prompt"
+      or fd.name contains "system-prompt"
+      or fd.name endswith "prompt.txt"
+      or fd.name endswith "instructions.yaml")
+    and not proc.name in (python, python3, gunicorn, uvicorn)
+    and k8s.ns.name = "ml-serving"
+  output: >
+    System prompt file accessed by unexpected process
+    (file=%fd.name proc=%proc.name pod=%k8s.pod.name
+     ns=%k8s.ns.name user=%user.name)
+  priority: WARNING
+  tags: [ml-security, prompt-extraction, mitre_collection]
+
+# ─── Falcosidekick Output Configuration ──────────────────────────────────────
+# Slide 14: Falco → Falcosidekick → VictoriaMetrics / Loki / Grafana → SOC
+# Configure in falcosidekick values:
+#   config:
+#     loki:
+#       hostport: http://loki.monitoring.svc.cluster.local:3100
+#     prometheus:
+#       hostport: http://victoriametrics.monitoring.svc.cluster.local:8428
+#     webhook:
+#       address: http://grafana.monitoring.svc.cluster.local:3000/api/alertmanager

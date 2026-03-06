@@ -1,0 +1,24 @@
+# vmagent scrape configuration
+global:
+  scrape_interval: 10s
+
+scrape_configs:
+  - job_name: 'llm-attack-lab'
+    static_configs:
+      - targets: ['llm-attack-lab:8000']
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: '(llm_.*|ml_.*)'
+        action: keep
+
+  - job_name: 'victoriametrics'
+    static_configs:
+      - targets: ['victoriametrics:8428']
+
+  - job_name: 'vmalert'
+    static_configs:
+      - targets: ['vmalert:8880']
+
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8889']

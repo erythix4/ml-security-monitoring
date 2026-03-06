@@ -1,0 +1,143 @@
+# Model Behavior Monitoring Alerts
+# Pattern 2: Detecting poisoning, drift, and extraction attempts
+#
+# Reference: FOSDEM 2026 - AI Security Monitoring
+# Author: Samuel Desseaux <samuel@erythix.tech>
+
+groups:
+  - name: ml_behavior_monitoring
+    interval: 1m
+    rules:
+      # ============================================
+      # DRIFT DETECTION
+      # ============================================
+      
+      # Alert: Prediction distribution drift (potential poisoning)
+      # PSI > 0.2 indicates significant distribution shift
+      - alert: ModelDistributionDrift
+        expr: |
+          ml_prediction_distribution_psi > 0.2
+        for: 15m
+        labels:
+          severity: warning
+          category: drift
+        annotations:
+          summary: "Prediction distribution drift on {{ $labels.model }}"
+          description: |
+            Model {{ $labels.model }} PSI score is {{ $value | printf "%.3f" }} 
+            (threshold: 0.2). May indicate data drift or poisoning attack.
+          runbook_url: "https://github.com/erythix/ml-security-monitoring/docs/runbooks/drift.md"
+
+      # Alert: Feature importance shift
+      # SHAP/LIME values changing significantly
+      - alert: FeatureImportanceShift
+        expr: |
+          abs(ml_feature_importance - ml_feature_importance offset 1d) > 0.15
+        for: 30m
+        labels:
+          severity: warning
+          category: drift
+        annotations:
+          summary: "Feature importance shift on {{ $labels.model }}"
+          description: |
+            Feature {{ $labels.feature }} importance changed by {{ $value | printf "%.2f" }} 
+            in last 24h. Model behavior may have changed.
+
+      # Alert: Accuracy drop on specific class (targeted attack)
+      - alert: TargetedAccuracyDrop
+        expr: |
+          (ml_accuracy_by_class - ml_accuracy_by_class offset 1d) < -0.1
+        for: 1h
+        labels:
+          severity: critical
+          category: poisoning
+        annotations:
+          summary: "Targeted accuracy drop on {{ $labels.model }} class {{ $labels.class }}"
+          description: |
+            Class {{ $labels.class }} accuracy dropped by {{ $value | printf "%.1f%%" }} 
+            in 24h. May indicate targeted poisoning attack.
+
+      # ============================================
+      # MODEL EXTRACTION DETECTION
+      # ============================================
+
+      # Alert: High query rate from single user/IP
+      # Key insight: 10K queries often enough to clone simple models
+      - alert: SuspiciousQueryPattern
+        expr: |
+          sum by (user_id) (rate(ml_api_queries_total[10m])) > 100
+        for: 5m
+        labels:
+          severity: critical
+          category: extraction
+        annotations:
+          summary: "Suspicious query pattern from user {{ $labels.user_id }}"
+          description: |
+            User {{ $labels.user_id }} making {{ $value | printf "%.0f" }} queries/min.
+            Potential model extraction attempt.
+          runbook_url: "https://github.com/erythix/ml-security-monitoring/docs/runbooks/extraction.md"
+
+      # Alert: Low entropy query pattern
+      # Systematic grid search indicates extraction attempt
+      - alert: LowEntropyQueryPattern
+        expr: |
+          ml_query_entropy_score < 2.0
+          AND rate(ml_api_queries_total[10m]) > 10
+        for: 10m
+        labels:
+          severity: warning
+          category: extraction
+        annotations:
+          summary: "Low entropy queries from {{ $labels.user_id }}"
+          description: |
+            Query entropy {{ $value | printf "%.2f" }} indicates systematic probing.
+            User may be mapping decision boundaries.
+
+      # Alert: Boundary probing behavior
+      # Queries clustered around decision boundaries
+      - alert: DecisionBoundaryProbing
+        expr: |
+          ml_queries_near_boundary_ratio > 0.7
+          AND rate(ml_api_queries_total[10m]) > 20
+        for: 15m
+        labels:
+          severity: critical
+          category: extraction
+        annotations:
+          summary: "Decision boundary probing detected on {{ $labels.model }}"
+          description: |
+            {{ $value | printf "%.0f%%" }} of queries near decision boundary.
+            Strong indicator of model extraction attempt.
+
+      # ============================================
+      # PERFORMANCE ANOMALIES
+      # ============================================
+
+      # Alert: Sudden latency increase
+      - alert: InferenceLatencySpike
+        expr: |
+          histogram_quantile(0.99, rate(ml_inference_duration_seconds_bucket[5m])) 
+          > 2 * histogram_quantile(0.99, rate(ml_inference_duration_seconds_bucket[1h]))
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Inference latency spike on {{ $labels.model }}"
+          description: |
+            P99 latency increased 2x from baseline. May indicate 
+            resource exhaustion attack or model issues.
+
+      # Alert: Error rate spike
+      - alert: InferenceErrorSpike
+        expr: |
+          rate(ml_inference_errors_total[5m]) 
+          / rate(ml_inference_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          category: performance
+        annotations:
+          summary: "High error rate on {{ $labels.model }}"
+          description: |
+            Error rate {{ $value | printf "%.1f%%" }} exceeds 5% threshold.

@@ -1,0 +1,138 @@
+# ML Security Monitoring Demo Stack
+# 
+# This docker-compose file sets up a complete observability stack
+# for demonstrating ML security monitoring capabilities.
+#
+# Usage:
+#   docker-compose up -d
+#   
+# Access:
+#   - Grafana: http://localhost:3000 (admin/admin)
+#   - Prometheus: http://localhost:9090
+#   - ML Exporter: http://localhost:8000/metrics
+#
+# Author: Samuel Desseaux - Erythix
+
+version: '3.8'
+
+services:
+  # Prometheus - Metrics Collection
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: ml-security-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/rules:/etc/prometheus/rules
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+      - '--storage.tsdb.retention.time=15d'
+    restart: unless-stopped
+
+  # Alertmanager - Alert Routing
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: ml-security-alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    restart: unless-stopped
+
+  # Loki - Log Aggregation
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: ml-security-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+
+  # Promtail - Log Shipping
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: ml-security-promtail
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml
+      - /var/log:/var/log:ro
+      - ./logs:/app/logs:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  # Grafana - Visualization
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: ml-security-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+    restart: unless-stopped
+
+  # ML Security Exporter - Custom Metrics
+  ml-exporter:
+    build:
+      context: ./ml-exporter
+      dockerfile: Dockerfile
+    container_name: ml-security-exporter
+    ports:
+      - "8000:8000"
+    environment:
+      - MODEL_NAME=fraud-detector-v2
+      - EXPORTER_PORT=8000
+    restart: unless-stopped
+
+  # Fraud Detection Model (Demo)
+  fraud-detector:
+    build:
+      context: ./fraud-detector
+      dockerfile: Dockerfile
+    container_name: ml-fraud-detector
+    ports:
+      - "8080:8080"
+    environment:
+      - EXPORTER_URL=http://ml-exporter:8000
+    depends_on:
+      - ml-exporter
+    restart: unless-stopped
+
+  # Attack Simulator (Demo)
+  attack-simulator:
+    build:
+      context: ./attack-simulator
+      dockerfile: Dockerfile
+    container_name: ml-attack-simulator
+    environment:
+      - TARGET_URL=http://fraud-detector:8080
+      - ATTACK_MODE=${ATTACK_MODE:-normal}
+    depends_on:
+      - fraud-detector
+    profiles:
+      - demo
+
+volumes:
+  prometheus_data:
+  loki_data:
+  grafana_data:
+
+networks:
+  default:
+    name: ml-security-network

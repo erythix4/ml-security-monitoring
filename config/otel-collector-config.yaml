@@ -1,0 +1,83 @@
+# OpenTelemetry Collector Configuration
+# Receives telemetry from LLM Attack Lab, exports to VictoriaMetrics + Loki
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'llm-attack-lab'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['llm-attack-lab:8000']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: '(llm_.*|ml_.*|python_.*|process_.*)'
+              action: keep
+
+        - job_name: 'otel-collector'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['localhost:8888']
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  resource:
+    attributes:
+      - key: service.namespace
+        value: llm-attack-lab
+        action: upsert
+
+exporters:
+  prometheusremotewrite:
+    endpoint: "http://victoriametrics:8428/api/v1/write"
+    tls:
+      insecure: true
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: otel
+
+  loki:
+    endpoint: "http://loki:3100/loki/api/v1/push"
+    labels:
+      attributes:
+        service.name: "service_name"
+        service.namespace: "service_namespace"
+
+  logging:
+    verbosity: basic
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [logging]
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: [memory_limiter, batch, resource]
+      exporters: [prometheusremotewrite, prometheus, logging]

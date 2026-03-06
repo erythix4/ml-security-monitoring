@@ -1,0 +1,173 @@
+# LogQL Query Library for ML Security Investigation
+# 
+# These queries are designed for use with Grafana Loki
+# to investigate ML security incidents.
+#
+# Author: Samuel Desseaux - Erythix
+
+# ============================================================
+# ADVERSARIAL DETECTION QUERIES
+# ============================================================
+
+# Find all adversarial detections for a specific user
+{job="ml-security"} |= "adversarial" | json | user_id="usr_abc123"
+
+# High reconstruction error events in last 24h
+{job="ml-security"} | json | reconstruction_error > 2.5
+
+# Adversarial detections with full context
+{job="ml-security"} 
+  |= "adversarial_detected" 
+  | json 
+  | line_format "{{.timestamp}} | User: {{.user_id}} | Model: {{.model}} | Confidence: {{.confidence}} | Error: {{.reconstruction_error}}"
+
+# Count adversarial events by model
+sum by (model) (
+  count_over_time({job="ml-security"} |= "adversarial" [24h])
+)
+
+# Top users with adversarial detections
+topk(10,
+  sum by (user_id) (
+    count_over_time({job="ml-security"} |= "adversarial" [1h])
+  )
+)
+
+
+# ============================================================
+# PROMPT INJECTION QUERIES
+# ============================================================
+
+# Prompt injection attempts with high confidence
+{job="llm-security"} |= "injection" | json | injection_score > 0.8
+
+# Injection attempts with full prompt context
+{job="llm-security"} 
+  |= "prompt_injection" 
+  | json 
+  | line_format "{{.timestamp}} | Score: {{.injection_score}} | User: {{.user_id}} | Prompt: {{.prompt | trunc 100}}"
+
+# System prompt extraction attempts
+{job="llm-security"} |= "system_prompt" | json | similarity_score > 0.6
+
+# Policy violations by type
+sum by (violation_type) (
+  count_over_time({job="llm-security"} |= "policy_violation" [24h])
+)
+
+# Jailbreak attempts timeline
+{job="llm-security"} |= "jailbreak" | json 
+  | line_format "{{.timestamp}} | Pattern: {{.pattern_type}} | Score: {{.jailbreak_score}}"
+
+
+# ============================================================
+# MODEL EXTRACTION QUERIES
+# ============================================================
+
+# High query rate users (potential extraction)
+{job="ml-security"} 
+  | json 
+  | user_id != "" 
+  | __error__="" 
+| sum by (user_id) (
+    count_over_time({job="ml-security"}[10m])
+  ) > 100
+
+# Low entropy query patterns (systematic probing)
+{job="ml-security"} |= "query_entropy" | json | entropy_score < 2.0
+
+# Query patterns from suspicious sources
+{job="ml-security"} 
+  | json 
+  | ip_address =~ ".*suspicious_range.*"
+
+
+# ============================================================
+# DRIFT AND POISONING QUERIES
+# ============================================================
+
+# Distribution drift events
+{job="ml-security"} |= "distribution_drift" | json | psi_score > 0.2
+
+# Accuracy drop events
+{job="ml-security"} |= "accuracy_drop" | json 
+  | line_format "{{.timestamp}} | Model: {{.model}} | Class: {{.class}} | Drop: {{.accuracy_delta}}"
+
+# Feature importance changes
+{job="ml-security"} |= "feature_shift" | json | shift_magnitude > 0.3
+
+
+# ============================================================
+# TOOL/AGENT SECURITY QUERIES
+# ============================================================
+
+# Sensitive tool calls
+{job="llm-security"} 
+  |= "tool_call" 
+  | json 
+  | tool =~ "shell|exec|write|delete|admin"
+
+# Failed tool calls (potential probing)
+{job="llm-security"} |= "tool_call" | json | status="failed"
+
+# Tool call chains (multi-step attacks)
+{job="llm-security"} 
+  |= "tool_call" 
+  | json 
+  | line_format "{{.timestamp}} | Session: {{.session_id}} | Tool: {{.tool}} | Status: {{.status}}"
+
+
+# ============================================================
+# CORRELATION QUERIES
+# ============================================================
+
+# Events with trace ID for correlation
+{job=~"ml-security|llm-security"} | json | trace_id="abc123def456"
+
+# User activity timeline
+{job=~"ml-security|llm-security"} 
+  | json 
+  | user_id="usr_abc123" 
+  | line_format "{{.timestamp}} | Event: {{.event_type}} | Details: {{.message}}"
+
+# Security events by severity
+{job=~"ml-security|llm-security"} 
+  | json 
+  | severity="critical"
+
+
+# ============================================================
+# AGGREGATION QUERIES
+# ============================================================
+
+# Count security events by type over time
+sum by (event_type) (
+  count_over_time({job="ml-security"}[1h])
+)
+
+# Security events per model
+sum by (model) (
+  count_over_time({job=~"ml-security|llm-security"} |= "security" [24h])
+)
+
+# Hourly security event rate
+sum(
+  rate({job=~"ml-security|llm-security"} |= "security" [1h])
+)
+
+
+# ============================================================
+# RETENTION POLICY RECOMMENDATIONS
+# ============================================================
+
+# Security logs: 90 days retention
+# - Critical for forensics and compliance
+# - Full event details preserved
+
+# Prediction logs: 30 days retention  
+# - Sufficient for drift analysis
+# - Can be sampled for longer retention
+
+# Debug logs: 7 days retention
+# - High volume, low security value
+# - Useful for recent troubleshooting only

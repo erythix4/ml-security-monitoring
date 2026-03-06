@@ -1,0 +1,15 @@
+remoteWrite:
+  - url: http://vmsingle-victoria-metrics-single-server:8428/api/v1/write
+
+resources:
+  requests:
+    memory: 64Mi
+    cpu: 50m
+
+extraScrapeConfigs:
+  - job_name: llm-attack-lab
+    scrape_interval: 10s
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - llm-attack-lab.ml-serving.svc.cluster.local:8000

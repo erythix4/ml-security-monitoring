@@ -1,0 +1,133 @@
+# LLM Attack Lab - Kubernetes Deployment
+# Works on: Docker Desktop K8s, kind, minikube
+# Production hardening (seccomp, PVC, init containers): see docs/K8S_DEPLOYMENT.md
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-attack-lab
+  namespace: ml-serving
+  labels:
+    app: llm-attack-lab
+    app.kubernetes.io/name: llm-attack-lab
+    app.kubernetes.io/component: ml-inference
+    app.kubernetes.io/part-of: iattack-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm-attack-lab
+  template:
+    metadata:
+      labels:
+        app: llm-attack-lab
+        security.iattack.erythix.tech/profile: ml-inference
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      securityContext:
+        fsGroup: 1000
+
+      serviceAccountName: llm-attack-lab
+
+      containers:
+        - name: llm-attack-lab
+          image: iattack-lab:latest
+          imagePullPolicy: Never
+          ports:
+            - name: web
+              containerPort: 8081
+              protocol: TCP
+            - name: metrics
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: FLASK_DEBUG
+              value: "false"
+            - name: OTEL_SERVICE_NAME
+              value: "llm-attack-lab"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "otel-collector.monitoring.svc.cluster.local:4317"
+            - name: OTEL_ENABLE_TRACING
+              value: "true"
+            - name: OTEL_ENABLE_METRICS
+              value: "true"
+            - name: PROMETHEUS_METRICS_PORT
+              value: "8000"
+            - name: ENVIRONMENT
+              value: "kubernetes"
+            - name: AUTO_STRESS
+              value: "true"
+            - name: AUTO_STRESS_DELAY
+              value: "5"
+            - name: AUTO_STRESS_POPULATE
+              value: "100"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: web
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: web
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /health
+              port: web
+            failureThreshold: 30
+            periodSeconds: 3
+
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 100Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-attack-lab
+  namespace: ml-serving
+  labels:
+    app: llm-attack-lab
+spec:
+  selector:
+    app: llm-attack-lab
+  ports:
+    - name: web
+      port: 8081
+      targetPort: web
+    - name: metrics
+      port: 8000
+      targetPort: metrics
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: llm-attack-lab
+  namespace: ml-serving
+  labels:
+    app: llm-attack-lab
+automountServiceAccountToken: false

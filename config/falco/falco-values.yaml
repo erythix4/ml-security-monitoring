@@ -1,0 +1,61 @@
+# Falco Helm Values for ML Security Lab
+# Aligns with: Slide 14 (Falco Runtime Security), Slide 16 (K8s-Native Deploy)
+# Deploy: helm install falco falcosecurity/falco -f config/falco/falco-values.yaml -n security
+---
+driver:
+  kind: ebpf    # Use eBPF driver (modern, no kernel module needed)
+
+# Load custom ML security rules
+customRules:
+  falco_ml_rules.yaml: |-
+    # Loaded from config/falco/falco_ml_rules.yaml at install time
+    # See: config/falco/falco_ml_rules.yaml for full rules
+
+# Falcosidekick integration (slide 14: Falco → Falcosidekick → VM/Loki/Grafana)
+falcosidekick:
+  enabled: true
+  config:
+    # Forward to Loki for LogQL investigation
+    loki:
+      hostport: http://loki.monitoring.svc.cluster.local:3100
+      minimumpriority: "warning"
+      customHeaders:
+        X-Scope-OrgID: "iattack-lab"
+
+    # Forward as Prometheus metrics to VictoriaMetrics
+    prometheus:
+      hostport: http://victoriametrics.monitoring.svc.cluster.local:8428
+
+    # Webhook to Grafana for unified alerting
+    webhook:
+      address: http://grafana.monitoring.svc.cluster.local:3000/api/alertmanager
+      minimumpriority: "critical"
+
+  webui:
+    enabled: true    # Enable Falcosidekick UI for demo purposes
+
+# Resource limits
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Kubernetes audit log integration (slide 14)
+collectors:
+  kubernetes:
+    enabled: true
+  docker:
+    enabled: false
+  containerd:
+    enabled: true
+
+# Output formatting for structured logging
+json_output: true
+json_include_output_property: true
+json_include_tags_property: true
+
+# Priority filter
+priority: warning

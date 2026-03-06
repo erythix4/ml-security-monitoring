@@ -1,0 +1,167 @@
+# Kyverno Policies for ML Pod Security
+# Aligns with: Reinforcement Slide 1 (Secure Model Deployment)
+# Requires: Kyverno installed in cluster
+---
+# ── Image Signature Verification ──────────────────────────────────────────────
+# Reinforcement Slide 1: cosign + Sigstore for image signing
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-ml-image-signatures
+  annotations:
+    policies.kyverno.io/title: Verify ML Container Image Signatures
+    policies.kyverno.io/description: >
+      Ensures all containers in ml-serving namespace have valid cosign signatures.
+      Prevents deployment of unsigned or tampered ML images.
+    policies.kyverno.io/severity: critical
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: verify-image-signature
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - ml-serving
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/erythix4/*"
+          attestors:
+            - count: 1
+              entries:
+                - keyless:
+                    issuer: "https://token.actions.githubusercontent.com"
+                    subject: "https://github.com/erythix4/*"
+                    rekor:
+                      url: https://rekor.sigstore.dev
+
+---
+# ── Require Security Labels ───────────────────────────────────────────────────
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-ml-security-labels
+  annotations:
+    policies.kyverno.io/title: Require ML Security Labels
+    policies.kyverno.io/description: >
+      All pods in ml-serving must have security classification labels
+      for observability and compliance tracking (EU AI Act Art. 12).
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: require-security-labels
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - ml-serving
+      validate:
+        message: "ML pods must have security.iattack.erythix.tech/profile label"
+        pattern:
+          metadata:
+            labels:
+              security.iattack.erythix.tech/profile: "?*"
+
+---
+# ── Enforce Read-Only Model Volumes ───────────────────────────────────────────
+# Reinforcement Slide 2: read-only model mounts
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: enforce-readonly-models
+  annotations:
+    policies.kyverno.io/title: Enforce Read-Only Model Mounts
+    policies.kyverno.io/description: >
+      Model volumes must be mounted read-only in ml-serving namespace.
+      Prevents runtime model tampering / data poisoning.
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: check-model-volume-readonly
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - ml-serving
+      validate:
+        message: "Model volumes must be mounted read-only in ml-serving"
+        foreach:
+          - list: "request.object.spec.containers[].volumeMounts[]"
+            deny:
+              conditions:
+                all:
+                  - key: "{{ element.mountPath }}"
+                    operator: AnyIn
+                    value:
+                      - "/app/models"
+                      - "/models"
+                      - "/opt/models"
+                  - key: "{{ element.readOnly || false }}"
+                    operator: Equals
+                    value: false
+
+---
+# ── Enforce Seccomp Profile ───────────────────────────────────────────────────
+# Reinforcement Slide 2: Custom seccomp for GPU ioctls
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: enforce-ml-seccomp
+  annotations:
+    policies.kyverno.io/title: Enforce Seccomp for ML Containers
+    policies.kyverno.io/description: >
+      All pods in ml-serving must use our custom seccomp profile
+      that allows GPU ioctls while blocking dangerous syscalls.
+spec:
+  validationFailureAction: Audit   # Start with Audit, switch to Enforce after testing
+  rules:
+    - name: check-seccomp
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - ml-serving
+      validate:
+        message: "ML pods must use the seccomp-ml-inference profile"
+        pattern:
+          spec:
+            securityContext:
+              seccompProfile:
+                type: "Localhost | RuntimeDefault"
+
+---
+# ── Block Privileged Containers ───────────────────────────────────────────────
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: block-privileged-ml
+  annotations:
+    policies.kyverno.io/title: Block Privileged Containers in ML Namespace
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: deny-privileged
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - ml-serving
+      validate:
+        message: "Privileged containers are not allowed in ml-serving"
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  privileged: "false"
+                  allowPrivilegeEscalation: "false"

@@ -1,0 +1,116 @@
+groups:
+  - name: llm_security_monitoring
+    interval: 30s
+    rules:
+
+      # ─── Prompt injection detected by classifier ───
+      - alert: PromptInjectionDetected
+        expr: |
+          ml_llm_injection_classifier_score > 0.85
+        for: 0s
+        labels:
+          severity: critical
+          category: llm_security
+        annotations:
+          summary: "Prompt injection detected on {{ $labels.app_name }}"
+          description: |
+            Injection classifier score={{ $value | humanize }} (threshold 0.85).
+            Model: {{ $labels.model_name }}, session={{ $labels.session_id }}.
+            Immediate investigation required.
+          runbook_url: "https://github.com/erythix4/ml-security-monitoring/wiki/prompt-injection"
+
+      # ─── Jailbreak attempt (safety guardrail bypass) ───
+      - alert: JailbreakAttemptDetected
+        expr: |
+          rate(ml_llm_safety_refusals_total[5m]) > 5
+          AND rate(ml_llm_jailbreak_pattern_matches_total[5m]) > 1
+        for: 1m
+        labels:
+          severity: critical
+          category: llm_security
+        annotations:
+          summary: "Jailbreak attempts on {{ $labels.app_name }}"
+          description: |
+            >5 safety refusals/min and >1 known jailbreak pattern match/min.
+            Potential systematic bypass attempt in progress.
+
+      # ─── PII / sensitive data leakage in LLM output ───
+      - alert: LLMOutputDataLeakage
+        expr: |
+          rate(ml_llm_pii_detections_in_output_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: critical
+          category: llm_security
+        annotations:
+          summary: "PII detected in LLM output for {{ $labels.app_name }}"
+          description: |
+            Sensitive data (PII/credentials) detected in model output.
+            GDPR / EU AI Act incident reporting may be required.
+            session_id={{ $labels.session_id }}, model={{ $labels.model_name }}.
+
+      # ─── RAG context poisoning (retrieved context anomaly score) ───
+      - alert: RAGContextPoisoning
+        expr: |
+          ml_rag_retrieved_context_anomaly_score > 0.75
+        for: 2m
+        labels:
+          severity: warning
+          category: llm_security
+        annotations:
+          summary: "Anomalous RAG context retrieved on {{ $labels.app_name }}"
+          description: |
+            Anomaly score={{ $value | humanize }} for retrieved context.
+            May indicate vector DB poisoning or adversarial document injection.
+          runbook_url: "https://github.com/erythix4/ml-security-monitoring/wiki/rag-poisoning"
+
+      # ─── Excessive system prompt extraction attempts ───
+      - alert: SystemPromptExtractionAttempt
+        expr: |
+          rate(ml_llm_system_prompt_probe_total[10m]) > 3
+        for: 1m
+        labels:
+          severity: warning
+          category: llm_security
+        annotations:
+          summary: "System prompt extraction probing on {{ $labels.app_name }}"
+          description: |
+            >3 system-prompt extraction patterns/min detected.
+            Attacker may be attempting to reverse-engineer safety instructions or IP.
+
+      # ─── Agent tool abuse (agentic LLM calling unexpected tools) ───
+      - alert: AgentUnexpectedToolCall
+        expr: |
+          ml_llm_agent_tool_calls_total{tool_name!~"(allowed_tool_1|allowed_tool_2|allowed_tool_3)"}
+            > 0
+        for: 0s
+        labels:
+          severity: critical
+          category: llm_security
+        annotations:
+          summary: "Agent called unexpected tool {{ $labels.tool_name }} on {{ $labels.app_name }}"
+          description: |
+            LLM agent invoked tool {{ $labels.tool_name }} which is not in the allowlist.
+            This may indicate prompt injection achieving arbitrary tool execution.
+
+      # ─── Token usage anomaly (potential DoS or exfiltration) ───
+      - alert: LLMTokenUsageSpike
+        expr: |
+          rate(ml_llm_tokens_total[5m])
+            > 3 * avg_over_time(rate(ml_llm_tokens_total[5m])[1h:5m])
+        for: 5m
+        labels:
+          severity: warning
+          category: llm_security
+        annotations:
+          summary: "LLM token usage spike on {{ $labels.app_name }}"
+          description: |
+            Token rate is 3× the 1-hour average.
+            Possible prompt stuffing, DoS, or bulk data extraction attempt.
+
+      # ─── Recording rule: LLM security composite score ───
+      - record: ml_llm_security_risk_score
+        expr: |
+          clamp_max(ml_llm_injection_classifier_score, 1) * 0.4
+          + clamp_max(rate(ml_llm_jailbreak_pattern_matches_total[5m]) / 5, 1) * 0.3
+          + clamp_max(ml_rag_retrieved_context_anomaly_score, 1) * 0.3

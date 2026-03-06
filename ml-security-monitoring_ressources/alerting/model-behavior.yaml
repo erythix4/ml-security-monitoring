@@ -1,0 +1,123 @@
+# Model Behavior Monitoring Alerts
+# Pattern 2: Detect poisoning and extraction attacks
+#
+# These rules detect:
+# - Prediction distribution drift (potential poisoning)
+# - Suspicious query patterns (model extraction)
+# - Targeted accuracy drops (backdoor attacks)
+
+groups:
+  - name: ml_behavior_monitoring
+    interval: 1m
+    rules:
+      # Alert: Prediction distribution drift
+      # Rationale: Poisoned models show shifted prediction distributions
+      - alert: ModelDistributionDrift
+        expr: |
+          ml_prediction_distribution_psi > 0.2
+        for: 15m
+        labels:
+          severity: warning
+          category: drift
+        annotations:
+          summary: "Prediction distribution drift on {{ $labels.model }}"
+          description: |
+            PSI score ({{ $value }}) exceeds threshold of 0.2.
+            Possible causes: data drift, model poisoning, or concept drift.
+            Investigate recent training data and model updates.
+          runbook_url: "https://github.com/erythix/ml-security-monitoring/docs/runbooks/drift.md"
+
+      # Alert: Sudden distribution shift
+      # Rationale: Rapid shifts may indicate active poisoning
+      - alert: SuddenDistributionShift
+        expr: |
+          delta(ml_prediction_distribution_psi[1h]) > 0.15
+        for: 5m
+        labels:
+          severity: critical
+          category: drift
+        annotations:
+          summary: "Sudden distribution shift on {{ $labels.model }}"
+          description: |
+            PSI increased by {{ $value }} in the last hour.
+            This rapid change may indicate active model poisoning.
+
+      # Alert: Potential model extraction (high query rate)
+      # Rationale: 10K queries are often enough to clone simple models
+      - alert: SuspiciousQueryPattern
+        expr: |
+          sum by (user_id, model) (
+            rate(ml_api_queries_total[10m])
+          ) > 100
+        for: 5m
+        labels:
+          severity: warning
+          category: extraction
+        annotations:
+          summary: "Suspicious query pattern from {{ $labels.user_id }}"
+          description: |
+            User is querying at {{ $value }} requests/minute.
+            This rate could enable model extraction within hours.
+            Consider implementing rate limiting.
+
+      # Alert: Low entropy query pattern (systematic probing)
+      # Rationale: Extraction attacks often use systematic input patterns
+      - alert: SystematicModelProbing
+        expr: |
+          ml_query_entropy_score < 2.0
+          AND rate(ml_api_queries_total[5m]) > 10
+        for: 10m
+        labels:
+          severity: warning
+          category: extraction
+        annotations:
+          summary: "Systematic probing detected from {{ $labels.user_id }}"
+          description: |
+            Low entropy ({{ $value }}) in query patterns suggests 
+            systematic model probing for extraction.
+
+      # Alert: Accuracy drop on specific class (targeted attack)
+      # Rationale: Backdoor attacks often target specific classes
+      - alert: TargetedAccuracyDrop
+        expr: |
+          (ml_accuracy_by_class - ml_accuracy_by_class offset 1d) < -0.1
+        for: 30m
+        labels:
+          severity: critical
+          category: poisoning
+        annotations:
+          summary: "Targeted accuracy drop on {{ $labels.model }} class {{ $labels.class }}"
+          description: |
+            Accuracy dropped by {{ $value }} on class {{ $labels.class }}.
+            This pattern may indicate a targeted backdoor attack.
+
+      # Alert: Feature importance shift
+      # Rationale: Poisoning can cause unexpected feature importance changes
+      - alert: FeatureImportanceShift
+        expr: |
+          abs(ml_feature_importance - ml_feature_importance offset 7d) 
+          / ml_feature_importance offset 7d > 0.5
+        for: 1h
+        labels:
+          severity: warning
+          category: poisoning
+        annotations:
+          summary: "Feature importance shift on {{ $labels.model }}"
+          description: |
+            Feature {{ $labels.feature }} importance changed by >50%.
+            Review recent training data for potential poisoning.
+
+      # Alert: Unusual prediction confidence distribution
+      - alert: ConfidenceDistributionAnomaly
+        expr: |
+          histogram_quantile(0.5, ml_prediction_confidence_bucket) < 0.6
+          OR histogram_quantile(0.5, ml_prediction_confidence_bucket) > 0.95
+        for: 30m
+        labels:
+          severity: warning
+          category: drift
+        annotations:
+          summary: "Unusual confidence distribution on {{ $labels.model }}"
+          description: |
+            Median prediction confidence is abnormal.
+            May indicate model degradation or distribution shift.

@@ -1,0 +1,159 @@
+# LLM Security Monitoring Alerts
+# Pattern 3: Detect prompt injection, jailbreaks, and extraction
+#
+# These rules detect:
+# - Direct and indirect prompt injection
+# - Jailbreak attempts
+# - System prompt extraction attempts
+# - Suspicious agent/tool usage
+
+groups:
+  - name: llm_security_monitoring
+    interval: 15s
+    rules:
+      # Alert: High confidence prompt injection detected
+      # Rationale: Classifier-based detection of injection attempts
+      - alert: PromptInjectionDetected
+        expr: |
+          llm_prompt_injection_score > 0.85
+        for: 0m
+        labels:
+          severity: critical
+          category: injection
+        annotations:
+          summary: "Prompt injection detected on {{ $labels.model }}"
+          description: |
+            Injection score: {{ $value }}
+            User: {{ $labels.user_id }}
+            This request should be blocked or flagged for review.
+          runbook_url: "https://github.com/erythix/ml-security-monitoring/docs/runbooks/injection.md"
+
+      # Alert: Moderate injection score with high frequency
+      # Rationale: Repeated attempts may indicate attack tuning
+      - alert: RepeatedInjectionAttempts
+        expr: |
+          sum by (user_id) (
+            rate(llm_injection_attempts_total[5m])
+          ) > 3
+          AND avg by (user_id) (llm_prompt_injection_score) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+          category: injection
+        annotations:
+          summary: "Repeated injection attempts from {{ $labels.user_id }}"
+          description: |
+            User is making multiple injection attempts.
+            Consider rate limiting or temporary block.
+
+      # Alert: System prompt extraction attempt
+      # Rationale: High similarity to system prompt in output
+      - alert: SystemPromptExtractionAttempt
+        expr: |
+          llm_prompt_similarity_to_system > 0.7 
+          OR llm_output_contains_system_prompt == 1
+        for: 0m
+        labels:
+          severity: critical
+          category: extraction
+        annotations:
+          summary: "System prompt extraction attempt on {{ $labels.model }}"
+          description: |
+            Output similarity to system prompt: {{ $value }}
+            User may be attempting to extract confidential instructions.
+
+      # Alert: Suspicious tool usage pattern (agent attacks)
+      # Rationale: Compromised agents may abuse tool access
+      - alert: SuspiciousToolUsage
+        expr: |
+          sum by (user_id) (
+            rate(llm_tool_calls_total{tool=~"shell|exec|write|delete|admin"}[5m])
+          ) > 5
+        for: 1m
+        labels:
+          severity: critical
+          category: agent_attack
+        annotations:
+          summary: "Suspicious tool usage from {{ $labels.user_id }}"
+          description: |
+            High rate of sensitive tool calls detected.
+            Tools: shell, exec, write, delete, admin
+            Investigate for potential agent compromise.
+
+      # Alert: Tool call failure spike
+      # Rationale: Attackers may probe tool capabilities
+      - alert: ToolCallFailureSpike
+        expr: |
+          rate(llm_tool_calls_total{status="failed"}[5m]) 
+          / rate(llm_tool_calls_total[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          category: agent_attack
+        annotations:
+          summary: "High tool call failure rate on {{ $labels.model }}"
+          description: |
+            More than 50% of tool calls are failing.
+            May indicate capability probing or attack attempts.
+
+      # Alert: Policy violation detected
+      # Rationale: Content filter triggers indicate potential jailbreak
+      - alert: ContentPolicyViolation
+        expr: |
+          increase(llm_output_policy_violations_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          category: jailbreak
+        annotations:
+          summary: "Content policy violation on {{ $labels.model }}"
+          description: |
+            Output triggered content filter: {{ $labels.violation_type }}
+            User: {{ $labels.user_id }}
+
+      # Alert: Jailbreak pattern detected
+      # Rationale: Known jailbreak patterns in prompts
+      - alert: JailbreakPatternDetected
+        expr: |
+          llm_jailbreak_pattern_score > 0.7
+        for: 0m
+        labels:
+          severity: warning
+          category: jailbreak
+        annotations:
+          summary: "Jailbreak pattern detected on {{ $labels.model }}"
+          description: |
+            Known jailbreak pattern score: {{ $value }}
+            Pattern type: {{ $labels.pattern_type }}
+
+      # Alert: RAG poisoning indicator (indirect injection)
+      # Rationale: Malicious content in retrieved documents
+      - alert: RAGPoisoningIndicator
+        expr: |
+          llm_retrieved_doc_injection_score > 0.6
+        for: 0m
+        labels:
+          severity: warning
+          category: indirect_injection
+        annotations:
+          summary: "Potential RAG poisoning on {{ $labels.model }}"
+          description: |
+            Retrieved document contains injection patterns.
+            Document source: {{ $labels.doc_source }}
+            Review document ingestion pipeline.
+
+      # Alert: Unusual token generation pattern
+      # Rationale: Jailbreaks often cause unusual output patterns
+      - alert: UnusualTokenPattern
+        expr: |
+          llm_output_perplexity > 100
+          OR llm_output_repetition_score > 0.5
+        for: 5m
+        labels:
+          severity: info
+          category: anomaly
+        annotations:
+          summary: "Unusual token pattern on {{ $labels.model }}"
+          description: |
+            Output shows unusual perplexity or repetition.
+            May indicate model confusion from adversarial input.

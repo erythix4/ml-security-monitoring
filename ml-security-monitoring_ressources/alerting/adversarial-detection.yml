@@ -1,0 +1,93 @@
+# Adversarial Input Detection Alerts
+# Pattern 1: Detecting crafted inputs designed to fool ML classifiers
+#
+# Reference: FOSDEM 2026 - AI Security Monitoring
+# Author: Samuel Desseaux <samuel@erythix.tech>
+
+groups:
+  - name: ml_adversarial_detection
+    interval: 30s
+    rules:
+      # Alert: High confidence prediction with high reconstruction error
+      # This pattern indicates the input doesn't match training distribution
+      # but the model is still confident - classic adversarial signature
+      - alert: PotentialAdversarialInput
+        expr: |
+          ml_input_reconstruction_error > 2.5 
+          AND ml_prediction_confidence > 0.95
+        for: 1m
+        labels:
+          severity: critical
+          category: adversarial
+        annotations:
+          summary: "Potential adversarial input detected on {{ $labels.model }}"
+          description: |
+            Model {{ $labels.model }} received input with high reconstruction error 
+            ({{ $value | printf "%.2f" }}) but high confidence prediction.
+            This pattern is characteristic of adversarial examples.
+          runbook_url: "https://github.com/erythix/ml-security-monitoring/docs/runbooks/adversarial.md"
+
+      # Alert: Input far from training distribution
+      # Embedding distance > 3 standard deviations from cluster centroid
+      - alert: OutOfDistributionInput
+        expr: |
+          ml_embedding_distance_to_centroid > 3 * ml_embedding_distance_threshold
+        for: 30s
+        labels:
+          severity: warning
+          category: adversarial
+        annotations:
+          summary: "Out-of-distribution input on {{ $labels.model }}"
+          description: |
+            Input embedding for model {{ $labels.model }} is {{ $value | printf "%.2f" }} 
+            standard deviations from training cluster centroid.
+          runbook_url: "https://github.com/erythix/ml-security-monitoring/docs/runbooks/ood.md"
+
+      # Alert: Sudden spike in prediction instability
+      # Comparing current rate to 1-hour baseline
+      - alert: PredictionInstabilitySpike
+        expr: |
+          rate(ml_unstable_predictions_total[5m]) 
+          > 3 * avg_over_time(rate(ml_unstable_predictions_total[5m])[1h:5m])
+        for: 5m
+        labels:
+          severity: warning
+          category: adversarial
+        annotations:
+          summary: "Prediction instability spike on {{ $labels.model }}"
+          description: |
+            Model {{ $labels.model }} showing 3x normal rate of unstable predictions.
+            May indicate coordinated adversarial attack.
+
+      # Alert: Ensemble disagreement spike
+      # Multiple models giving conflicting predictions
+      - alert: EnsembleDisagreementSpike
+        expr: |
+          ml_ensemble_disagreement_rate > 0.3
+          AND rate(ml_predictions_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          category: adversarial
+        annotations:
+          summary: "High ensemble disagreement on {{ $labels.model_group }}"
+          description: |
+            Ensemble {{ $labels.model_group }} showing {{ $value | printf "%.1f%%" }} 
+            disagreement rate. May indicate adversarial inputs.
+
+      # Alert: Gradient-based attack signature
+      # Inputs with suspiciously small perturbations from known samples
+      - alert: SuspiciousPerturbationPattern
+        expr: |
+          ml_input_perturbation_norm > 0 
+          AND ml_input_perturbation_norm < 0.1
+          AND ml_prediction_changed == 1
+        for: 1m
+        labels:
+          severity: critical
+          category: adversarial
+        annotations:
+          summary: "Possible gradient attack on {{ $labels.model }}"
+          description: |
+            Detected minimal perturbation (L2 norm: {{ $value | printf "%.4f" }}) 
+            causing prediction change. Signature of FGSM/PGD attack.

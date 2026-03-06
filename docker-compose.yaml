@@ -1,0 +1,179 @@
+# Docker Compose for iAttack Lab - Full CNCF Security Stack
+# Aligns with: Slide 13 (CNCF Stack), Slide 15 (OTel Architecture)
+# Components: App + OTel Collector + VictoriaMetrics + vmalert + Loki + Grafana + vmagent
+
+services:
+  # ═══════════════════════════════════════════
+  # LLM Attack Lab Application
+  # ═══════════════════════════════════════════
+  llm-attack-lab:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: llm-attack-lab
+    ports:
+      - "8081:8081"
+      - "8000:8000"
+    environment:
+      - FLASK_DEBUG=false
+      - OTEL_SERVICE_NAME=llm-attack-lab
+      - OTEL_SERVICE_VERSION=1.0.0
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
+      - PROMETHEUS_METRICS_PORT=8000
+      - ENVIRONMENT=production
+      - AUTO_STRESS=true
+      - AUTO_STRESS_DELAY=5
+      - AUTO_STRESS_POPULATE=100
+      - AUTO_STRESS_BATCH=10
+      - AUTO_STRESS_DELAY_BATCH=0.2
+      - AUTO_STRESS_WORKERS=5
+      - AUTO_STRESS_ATTACK_RATIO=0.7
+    depends_on:
+      otel-collector:
+        condition: service_started
+    networks:
+      - monitoring
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ═══════════════════════════════════════════
+  # OpenTelemetry Collector (Slide 15)
+  # ═══════════════════════════════════════════
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.91.0
+    container_name: otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./config/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8888:8888"
+      - "8889:8889"
+      - "13133:13133"
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - victoriametrics
+
+  # ═══════════════════════════════════════════
+  # VictoriaMetrics (Slide 13)
+  # ═══════════════════════════════════════════
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.96.0
+    container_name: victoriametrics
+    ports:
+      - "8428:8428"
+    volumes:
+      - victoriametrics-data:/storage
+    command:
+      - "--storageDataPath=/storage"
+      - "--httpListenAddr=:8428"
+      - "--retentionPeriod=30d"
+      - "--selfScrapeInterval=10s"
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════
+  # vmalert - ML Security Alert Rules
+  # ═══════════════════════════════════════════
+  vmalert:
+    image: victoriametrics/vmalert:v1.96.0
+    container_name: vmalert
+    ports:
+      - "8880:8880"
+    volumes:
+      - ./config/vmalert:/etc/vmalert/rules:ro
+    command:
+      - "--datasource.url=http://victoriametrics:8428"
+      - "--remoteRead.url=http://victoriametrics:8428"
+      - "--remoteWrite.url=http://victoriametrics:8428"
+      - "--httpListenAddr=:8880"
+      - "--rule=/etc/vmalert/rules/*.yaml"
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - victoriametrics
+
+  # ═══════════════════════════════════════════
+  # Loki - Log Aggregation (Slide 13)
+  # ═══════════════════════════════════════════
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki-data:/loki
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════
+  # Grafana (Slide 13)
+  # ═══════════════════════════════════════════
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=llmattacklab
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_DOMAIN=localhost
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - victoriametrics
+      - loki
+      - vmalert
+
+  # ═══════════════════════════════════════════
+  # vmagent (Prometheus scraping)
+  # ═══════════════════════════════════════════
+  vmagent:
+    image: victoriametrics/vmagent:v1.96.0
+    container_name: vmagent
+    ports:
+      - "8429:8429"
+    volumes:
+      - ./config/vmagent.yaml:/etc/prometheus/prometheus.yml:ro
+      - vmagent-data:/vmagentdata
+    command:
+      - "--promscrape.config=/etc/prometheus/prometheus.yml"
+      - "--remoteWrite.url=http://victoriametrics:8428/api/v1/write"
+      - "--httpListenAddr=:8429"
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - victoriametrics
+      - llm-attack-lab
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  victoriametrics-data:
+  grafana-data:
+  vmagent-data:
+  loki-data:

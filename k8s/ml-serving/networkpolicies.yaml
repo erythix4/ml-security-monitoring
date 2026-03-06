@@ -1,0 +1,119 @@
+# NetworkPolicies for ML Security Lab
+# Aligns with: Slide 11 (K8s NetworkPolicies), Reinforcement Slide 2
+---
+# Default deny all ingress in ml-serving namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: ml-serving
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# Allow inference traffic only from ingress + monitoring
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-inference-traffic
+  namespace: ml-serving
+  annotations:
+    description: "Allow inference API access from ingress and metrics scraping from monitoring"
+spec:
+  podSelector:
+    matchLabels:
+      app: llm-attack-lab
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow web traffic from ingress controller
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - port: 8081
+          protocol: TCP
+    # Allow Prometheus scraping from monitoring namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 8000
+          protocol: TCP
+        - port: 9090
+          protocol: TCP
+  egress:
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Allow OTel export to monitoring namespace
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 4317
+          protocol: TCP
+        - port: 4318
+          protocol: TCP
+
+---
+# Rate limiting via NetworkPolicy annotations (Cilium)
+# Slide 11: K8s NetworkPolicies for API rate limiting
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rate-limit-inference
+  namespace: ml-serving
+  annotations:
+    # Cilium rate limiting (if using Cilium CNI)
+    io.cilium.proxy/rate-limit: "100/minute"
+    description: |
+      Prevent model extraction: limit API query rate per source.
+      10K queries can clone a simple model (slide 11).
+spec:
+  podSelector:
+    matchLabels:
+      app: llm-attack-lab
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - port: 8081
+          protocol: TCP
+
+---
+# Isolate monitoring namespace - only allow scraping
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-ingress
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow metrics from ml-serving
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ml-serving
+    # Allow internal monitoring traffic
+    - from:
+        - podSelector: {}

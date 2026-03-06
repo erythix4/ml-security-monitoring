@@ -1,0 +1,290 @@
+groups:
+  # =============================================================================
+  # ADVERSARIAL PATTERN ALERTS
+  # Detect adversarial inputs, perturbations, and out-of-distribution samples
+  # =============================================================================
+  - name: adversarial_detection
+    interval: 30s
+    rules:
+      # Alert: PotentialAdversarialInput
+      # Triggers when reconstruction error is high AND prediction confidence is high
+      # This pattern is typical of adversarial examples
+      - alert: PotentialAdversarialInput
+        expr: |
+          (
+            histogram_quantile(0.95, rate(ml_input_reconstruction_error_bucket[5m])) > 2.5
+            AND
+            histogram_quantile(0.95, rate(ml_prediction_confidence_bucket[5m])) > 0.95
+          )
+        for: 1m
+        labels:
+          severity: warning
+          pattern: adversarial
+          attack_type: adversarial_inputs
+        annotations:
+          summary: "Potential adversarial input detected"
+          description: "High reconstruction error ({{ $value | printf \"%.2f\" }}) combined with high confidence suggests adversarial manipulation"
+          runbook_url: "https://wiki.example.com/runbooks/adversarial-detection"
+          detected_attacks: "FGSM, PGD, Adversarial inputs"
+
+      # Alert: OutOfDistributionInput
+      # Triggers when embedding distance exceeds 3x the configured threshold
+      - alert: OutOfDistributionInput
+        expr: |
+          ml_embedding_distance_to_centroid > 3 * on(model_name) ml_embedding_distance_threshold
+          OR
+          histogram_quantile(0.99, rate(ml_embedding_distance_to_centroid_bucket[5m])) > 10
+        for: 2m
+        labels:
+          severity: warning
+          pattern: adversarial
+          attack_type: ood_inputs
+        annotations:
+          summary: "Out-of-distribution input detected"
+          description: "Embedding distance {{ $value | printf \"%.2f\" }} exceeds 3x threshold for model {{ $labels.model_name }}"
+          runbook_url: "https://wiki.example.com/runbooks/ood-detection"
+          detected_attacks: "Out-of-distribution, Adversarial"
+
+      # Alert: PredictionInstabilitySpike
+      # Triggers when unstable predictions rate exceeds 3x the hourly average
+      - alert: PredictionInstabilitySpike
+        expr: |
+          rate(ml_unstable_predictions_total[5m]) > 3 * avg_over_time(rate(ml_unstable_predictions_total[5m])[1h:5m])
+        for: 3m
+        labels:
+          severity: warning
+          pattern: adversarial
+          attack_type: adversarial_inputs
+        annotations:
+          summary: "Prediction instability spike detected"
+          description: "Rate of unstable predictions ({{ $value | printf \"%.2f\" }}/s) exceeds 3x the 1-hour average"
+          runbook_url: "https://wiki.example.com/runbooks/instability-detection"
+          detected_attacks: "Adversarial inputs"
+
+  # =============================================================================
+  # BEHAVIOR PATTERN ALERTS
+  # Detect data poisoning, model drift, and model extraction attempts
+  # =============================================================================
+  - name: behavior_anomaly
+    interval: 1m
+    rules:
+      # Alert: ModelDistributionDrift
+      # Triggers when PSI score indicates significant drift
+      - alert: ModelDistributionDrift
+        expr: |
+          ml_prediction_distribution_psi > 0.2
+        for: 15m
+        labels:
+          severity: warning
+          pattern: behavior
+          attack_type: data_poisoning
+        annotations:
+          summary: "Model distribution drift detected"
+          description: "PSI score {{ $value | printf \"%.3f\" }} > 0.2 for model {{ $labels.model_name }} over 15 minutes"
+          runbook_url: "https://wiki.example.com/runbooks/drift-detection"
+          detected_attacks: "Data poisoning, Model drift"
+
+      # Alert: SuspiciousQueryPattern
+      # Triggers when a user/IP exceeds 100 requests per 10 minutes
+      - alert: SuspiciousQueryPattern
+        expr: |
+          sum by (user_id) (rate(ml_api_queries_total[10m])) * 600 > 100
+        for: 5m
+        labels:
+          severity: warning
+          pattern: behavior
+          attack_type: model_extraction
+        annotations:
+          summary: "Suspicious query pattern detected"
+          description: "User {{ $labels.user_id }} made {{ $value | printf \"%.0f\" }} requests in 10 minutes (threshold: 100)"
+          runbook_url: "https://wiki.example.com/runbooks/extraction-detection"
+          detected_attacks: "Model extraction"
+
+      # Alert: TargetedAccuracyDrop
+      # Triggers when per-class accuracy drops more than 10% from baseline
+      - alert: TargetedAccuracyDrop
+        expr: |
+          (
+            ml_baseline_accuracy - ml_accuracy_by_class
+          ) / ml_baseline_accuracy > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          pattern: behavior
+          attack_type: targeted_attack
+        annotations:
+          summary: "Targeted accuracy drop detected"
+          description: "Accuracy for class {{ $labels.class_name }} dropped {{ $value | printf \"%.1f\" }}% from baseline"
+          runbook_url: "https://wiki.example.com/runbooks/poisoning-detection"
+          detected_attacks: "Targeted poisoning"
+
+      # Alert: ClassDistributionShift
+      # Triggers when class prediction distribution changes suddenly
+      - alert: ClassDistributionShift
+        expr: |
+          abs(
+            rate(ml_predictions_by_class_total[5m])
+            - avg_over_time(rate(ml_predictions_by_class_total[5m])[6h:5m])
+          ) / (avg_over_time(rate(ml_predictions_by_class_total[5m])[6h:5m]) + 0.001) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          pattern: behavior
+          attack_type: data_poisoning
+        annotations:
+          summary: "Sudden class distribution shift"
+          description: "Class {{ $labels.predicted_class }} prediction rate changed by {{ $value | printf \"%.1f\" }}%"
+          runbook_url: "https://wiki.example.com/runbooks/drift-detection"
+          detected_attacks: "Data poisoning, Drift"
+
+  # =============================================================================
+  # LLM PATTERN ALERTS
+  # Detect prompt injection, jailbreak, and system prompt extraction attempts
+  # =============================================================================
+  - name: llm_security
+    interval: 15s
+    rules:
+      # Alert: PromptInjectionDetected
+      # Triggers when injection classifier score exceeds threshold
+      - alert: PromptInjectionDetected
+        expr: |
+          histogram_quantile(0.95, rate(llm_prompt_injection_score_bucket[5m])) > 0.85
+        for: 1m
+        labels:
+          severity: critical
+          pattern: llm
+          attack_type: prompt_injection
+        annotations:
+          summary: "Prompt injection attack detected"
+          description: "Injection score {{ $value | printf \"%.2f\" }} exceeds threshold 0.85 for model {{ $labels.model_name }}"
+          runbook_url: "https://wiki.example.com/runbooks/injection-detection"
+          detected_attacks: "Prompt injection, Jailbreak"
+
+      # Alert: SystemPromptExtractionAttempt
+      # Triggers when input similarity to system prompt is high OR system prompt detected in output
+      - alert: SystemPromptExtractionAttempt
+        expr: |
+          histogram_quantile(0.95, rate(llm_prompt_similarity_to_system_bucket[5m])) > 0.7
+          OR
+          rate(llm_output_contains_system_prompt_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          pattern: llm
+          attack_type: system_prompt_extraction
+        annotations:
+          summary: "System prompt extraction attempt detected"
+          description: "High similarity to system prompt ({{ $value | printf \"%.2f\" }}) or system prompt leak detected"
+          runbook_url: "https://wiki.example.com/runbooks/extraction-detection"
+          detected_attacks: "System prompt extraction"
+
+      # Alert: SuspiciousToolUsage
+      # Triggers when dangerous tool calls exceed threshold
+      - alert: SuspiciousToolUsage
+        expr: |
+          sum by (user_id) (
+            rate(llm_tool_calls_total{tool_name=~"shell|exec|write|system|eval"}[5m])
+          ) * 300 > 5
+        for: 1m
+        labels:
+          severity: critical
+          pattern: llm
+          attack_type: agent_attacks
+        annotations:
+          summary: "Suspicious tool usage pattern detected"
+          description: "User {{ $labels.user_id }} made {{ $value | printf \"%.0f\" }} dangerous tool calls in 5 minutes"
+          runbook_url: "https://wiki.example.com/runbooks/agent-security"
+          detected_attacks: "Agent attacks, Prompt injection"
+
+      # Alert: RepeatedPolicyViolations
+      # Triggers when policy violations occur repeatedly
+      - alert: RepeatedPolicyViolations
+        expr: |
+          increase(llm_output_policy_violations_total[10m]) > 5
+        for: 1m
+        labels:
+          severity: warning
+          pattern: llm
+          attack_type: jailbreak
+        annotations:
+          summary: "Repeated content policy violations"
+          description: "{{ $value | printf \"%.0f\" }} policy violations in 10 minutes for model {{ $labels.model_name }}"
+          runbook_url: "https://wiki.example.com/runbooks/jailbreak-detection"
+          detected_attacks: "Jailbreak"
+
+      # Alert: HighInjectionScoreRate
+      # Triggers when there's a sustained rate of high injection scores
+      - alert: HighInjectionScoreRate
+        expr: |
+          rate(llm_prompt_injection_score_count[5m]) > 0
+          AND
+          histogram_quantile(0.50, rate(llm_prompt_injection_score_bucket[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          pattern: llm
+          attack_type: prompt_injection
+        annotations:
+          summary: "Sustained prompt injection attempts"
+          description: "Median injection score is {{ $value | printf \"%.2f\" }} over 5 minutes"
+          runbook_url: "https://wiki.example.com/runbooks/injection-detection"
+          detected_attacks: "Prompt injection"
+
+  # =============================================================================
+  # SYSTEM HEALTH ALERTS
+  # Monitor overall security posture
+  # =============================================================================
+  - name: security_health
+    interval: 1m
+    rules:
+      # Alert: HighSecurityAlertRate
+      # Triggers when security alerts are firing frequently
+      - alert: HighSecurityAlertRate
+        expr: |
+          sum(rate(security_alerts_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          pattern: system
+        annotations:
+          summary: "High rate of security alerts"
+          description: "Security alert rate is {{ $value | printf \"%.2f\" }}/s, indicating potential attack"
+
+      # Alert: CriticalSecurityAlerts
+      # Triggers when critical severity alerts are being raised
+      - alert: CriticalSecurityAlerts
+        expr: |
+          sum(rate(security_alerts_total{severity="critical"}[5m])) > 0
+        for: 1m
+        labels:
+          severity: critical
+          pattern: system
+        annotations:
+          summary: "Critical security alerts detected"
+          description: "Critical security events are occurring at {{ $value | printf \"%.2f\" }}/s"
+
+      # Alert: AttackSuccessRateHigh
+      # Triggers when attack success rate is concerning
+      - alert: AttackSuccessRateHigh
+        expr: |
+          sum(rate(llm_attacks_total{success="true"}[5m])) / sum(rate(llm_attacks_total[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: critical
+          pattern: system
+        annotations:
+          summary: "High attack success rate"
+          description: "{{ $value | printf \"%.1f\" }}% of attacks are succeeding"
+
+      # Alert: LowDetectionRate
+      # Triggers when detection rate is too low
+      - alert: LowDetectionRate
+        expr: |
+          sum(rate(llm_attacks_total{detected="true"}[5m])) / sum(rate(llm_attacks_total[5m])) < 0.5
+        for: 10m
+        labels:
+          severity: warning
+          pattern: system
+        annotations:
+          summary: "Low attack detection rate"
+          description: "Only {{ $value | printf \"%.1f\" }}% of attacks are being detected"

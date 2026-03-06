@@ -1,0 +1,399 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# iAttack Lab - ML/LLM Security Alert Rules for vmalert
+# 22+ rules mapped to MITRE ATLAS, aligned with presentation slides 10-17
+#
+# MITRE ATLAS reference: https://atlas.mitre.org/techniques
+# Metrics source: iAttack Lab Prometheus exporter (:8000/metrics)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+groups:
+  # ──────────────────────────────────────────────────────────────────────────
+  # LLM Security (Slide 10: Input Validation)
+  # ──────────────────────────────────────────────────────────────────────────
+  - name: llm_security_alerts
+    interval: 15s
+    rules:
+      # Rule 1
+      - alert: PromptInjectionDetected
+        expr: histogram_quantile(0.95, rate(llm_prompt_injection_score_bucket[5m])) > 0.85
+        for: 0m
+        labels:
+          severity: critical
+          category: llm-security
+          mitre_atlas: "AML.T0051"
+          slide: "10"
+        annotations:
+          summary: "Prompt injection detected (P95 score {{ $value }})"
+          description: "ATLAS AML.T0051 - LLM Prompt Injection. Classifier P95 exceeds 0.85 threshold."
+          runbook: "Investigate recent prompts in Loki. Check for instruction override patterns."
+
+      # Rule 2
+      - alert: PromptInjectionVolumeSpike
+        expr: rate(llm_prompt_injection_score_count[5m]) > 2 * rate(llm_prompt_injection_score_count[30m])
+        for: 2m
+        labels:
+          severity: high
+          category: llm-security
+          mitre_atlas: "AML.T0051"
+          slide: "10"
+        annotations:
+          summary: "Prompt injection attempt volume 2x above baseline"
+          description: "ATLAS AML.T0051 - Sustained injection campaign detected."
+
+      # Rule 3
+      - alert: SystemPromptExtractionAttempt
+        expr: histogram_quantile(0.95, rate(llm_prompt_similarity_to_system_bucket[5m])) > 0.9
+        for: 0m
+        labels:
+          severity: critical
+          category: llm-security
+          mitre_atlas: "AML.T0044"
+          slide: "10"
+        annotations:
+          summary: "System prompt extraction attempt (P95 similarity {{ $value }})"
+          description: "ATLAS AML.T0044 - Full ML Model Access. User input closely matches system prompt."
+
+      # Rule 4
+      - alert: SuspiciousToolUsage
+        expr: sum(rate(llm_tool_calls_total{tool=~"shell|exec|write"}[5m])) * 300 > 5
+        for: 1m
+        labels:
+          severity: high
+          category: llm-security
+          mitre_atlas: "AML.T0048"
+          slide: "10"
+        annotations:
+          summary: "Suspicious tool calls: {{ $value }} shell/exec/write in 5m"
+          description: "ATLAS AML.T0048 - Command and Control via ML Service."
+
+      # Rule 5
+      - alert: OutputPolicyViolation
+        expr: rate(llm_output_policy_violations_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: high
+          category: llm-security
+          mitre_atlas: "AML.T0051"
+          slide: "10"
+        annotations:
+          summary: "LLM output policy violation detected"
+          description: "Content filter triggered — possible jailbreak or injection bypass."
+
+      # Rule 6
+      - alert: JailbreakSuccessRate
+        expr: >
+          rate(llm_attacks_total{attack_type="jailbreak",success="true"}[5m])
+          /
+          (rate(llm_attacks_total{attack_type="jailbreak"}[5m]) > 0)
+          > 0.3
+        for: 2m
+        labels:
+          severity: critical
+          category: llm-security
+          mitre_atlas: "AML.T0051"
+          slide: "10"
+        annotations:
+          summary: "Jailbreak success rate above 30%"
+          description: "Defenses failing to block jailbreak attempts."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Adversarial Detection (Slide 11: Anomaly Detection)
+  # ──────────────────────────────────────────────────────────────────────────
+  - name: adversarial_detection_alerts
+    interval: 15s
+    rules:
+      # Rule 7
+      - alert: PotentialAdversarialInput
+        expr: >
+          histogram_quantile(0.95, rate(ml_input_reconstruction_error_bucket[5m])) > 2.5
+          and
+          histogram_quantile(0.95, rate(ml_prediction_confidence_bucket[5m])) > 0.95
+        for: 0m
+        labels:
+          severity: critical
+          category: adversarial
+          mitre_atlas: "AML.T0043"
+          slide: "11"
+        annotations:
+          summary: "Adversarial input: high recon error + high confidence"
+          description: "ATLAS AML.T0043 - Craft Adversarial Data. Classic adversarial pattern: autoencoder flags anomaly but model is overconfident."
+
+      # Rule 8
+      - alert: OutOfDistributionInput
+        expr: histogram_quantile(0.95, rate(ml_embedding_distance_to_centroid_bucket[5m])) > ml_embedding_distance_threshold * 3
+        for: 0m
+        labels:
+          severity: high
+          category: adversarial
+          mitre_atlas: "AML.T0043"
+          slide: "11"
+        annotations:
+          summary: "Out-of-distribution input (distance 3x threshold)"
+          description: "ATLAS AML.T0043 - Input embeddings far from training distribution centroid."
+
+      # Rule 9
+      - alert: PredictionInstability
+        expr: rate(ml_unstable_predictions_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          category: adversarial
+          mitre_atlas: "AML.T0043"
+          slide: "11"
+        annotations:
+          summary: "Predictions unstable under perturbation"
+          description: "ATLAS AML.T0043 - Model outputs change with small input perturbations, indicating adversarial sensitivity."
+
+      # Rule 10
+      - alert: ReconstructionErrorSpike
+        expr: >
+          rate(ml_input_reconstruction_error_sum[5m]) / rate(ml_input_reconstruction_error_count[5m])
+          > 2 *
+          rate(ml_input_reconstruction_error_sum[1h]) / rate(ml_input_reconstruction_error_count[1h])
+        for: 3m
+        labels:
+          severity: high
+          category: adversarial
+          mitre_atlas: "AML.T0043"
+          slide: "11"
+        annotations:
+          summary: "Reconstruction error 2x above hourly baseline"
+          description: "Sustained anomalous input pattern — possible coordinated adversarial campaign."
+
+      # Rule 11
+      - alert: SuspiciousPatternsSurge
+        expr: rate(suspicious_patterns_detected_total[5m]) * 300 > 20
+        for: 1m
+        labels:
+          severity: high
+          category: adversarial
+          mitre_atlas: "AML.T0043"
+          slide: "11"
+        annotations:
+          summary: "{{ $value }} suspicious patterns detected in 5m"
+          description: "Input analysis flagging abnormal volume of suspicious patterns."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Model Behavior Monitoring (Slide 12)
+  # ──────────────────────────────────────────────────────────────────────────
+  - name: model_behavior_alerts
+    interval: 15s
+    rules:
+      # Rule 12
+      - alert: ModelDistributionDrift
+        expr: ml_prediction_distribution_psi > 0.2
+        for: 5m
+        labels:
+          severity: high
+          category: model-behavior
+          mitre_atlas: "AML.T0031"
+          slide: "12"
+        annotations:
+          summary: "Model drift detected (PSI={{ $value }})"
+          description: "ATLAS AML.T0031 - Erode ML Model Integrity. PSI > 0.2 = significant distribution shift."
+
+      # Rule 13
+      - alert: ModelExtractionAttempt
+        expr: sum by (source_ip) (rate(ml_api_queries_total[5m])) * 300 > 50
+        for: 2m
+        labels:
+          severity: critical
+          category: model-behavior
+          mitre_atlas: "AML.T0024"
+          slide: "12"
+        annotations:
+          summary: "Model extraction from {{ $labels.source_ip }} ({{ $value }} queries/5m)"
+          description: "ATLAS AML.T0024 - Exfiltration via ML Inference API. High-volume systematic querying."
+
+      # Rule 14
+      - alert: AccuracyDegradation
+        expr: ml_accuracy_by_class < ml_baseline_accuracy * 0.8
+        for: 5m
+        labels:
+          severity: high
+          category: model-behavior
+          mitre_atlas: "AML.T0031"
+          slide: "12"
+        annotations:
+          summary: "Accuracy dropped below 80% of baseline"
+          description: "ATLAS AML.T0031 - Possible data poisoning or model degradation."
+
+      # Rule 15
+      - alert: ModelConfidenceAnomaly
+        expr: model_confidence_deviation > 0.3
+        for: 3m
+        labels:
+          severity: warning
+          category: model-behavior
+          mitre_atlas: "AML.T0018"
+          slide: "12"
+        annotations:
+          summary: "Model confidence deviation {{ $value }} from expected"
+          description: "ATLAS AML.T0018 - Backdoor ML Model. Unusual confidence patterns may indicate backdoor activation."
+
+      # Rule 16
+      - alert: PredictionClassImbalance
+        expr: >
+          max(rate(ml_predictions_by_class_total[10m]))
+          /
+          (sum(rate(ml_predictions_by_class_total[10m])) > 0)
+          > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          category: model-behavior
+          mitre_atlas: "AML.T0020"
+          slide: "12"
+        annotations:
+          summary: "Single class dominates >90% of predictions"
+          description: "ATLAS AML.T0020 - Poison Training Data. Extreme class imbalance may indicate poisoning effect."
+
+      # Rule 17
+      - alert: ModelExtractionLowEntropy
+        expr: >
+          sum by (source_ip) (rate(ml_api_queries_total[5m])) * 300 > 30
+          and
+          ml_prediction_stability_score < 0.05
+        for: 3m
+        labels:
+          severity: critical
+          category: model-behavior
+          mitre_atlas: "AML.T0024"
+          slide: "12"
+        annotations:
+          summary: "Model extraction: high query rate + low output entropy"
+          description: "ATLAS AML.T0024 - Systematic probing with structured inputs (low stability variance = deterministic queries)."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # SOC Integration (Slide 17)
+  # ──────────────────────────────────────────────────────────────────────────
+  - name: soc_alerts
+    interval: 15s
+    rules:
+      # Rule 18
+      - alert: HighSecurityRiskScore
+        expr: max(security_risk_score{risk_category="overall"}) > 70
+        for: 1m
+        labels:
+          severity: critical
+          category: soc
+          mitre_atlas: "AML.T0040"
+          slide: "17"
+        annotations:
+          summary: "Security risk score critical ({{ $value }}/100)"
+          description: "ATLAS AML.T0040 - ML Model Inference API Access. Aggregate risk indicates active threat."
+
+      # Rule 19
+      - alert: ThreatLevelElevated
+        expr: security_threat_level >= 3
+        for: 0m
+        labels:
+          severity: critical
+          category: soc
+          mitre_atlas: "AML.T0042"
+          slide: "17"
+        annotations:
+          summary: "Threat level HIGH or CRITICAL ({{ $value }})"
+          description: "ATLAS AML.T0042 - Verify Attack. Threat escalation confirmed by multiple signals."
+
+      # Rule 20
+      - alert: SystemCompromised
+        expr: llm_compromised_status == 1
+        for: 0m
+        labels:
+          severity: critical
+          category: soc
+          mitre_atlas: "AML.T0048"
+          slide: "17"
+        annotations:
+          summary: "System is in COMPROMISED state"
+          description: "ATLAS AML.T0048 - Active compromise detected. Immediate investigation required."
+
+      # Rule 21
+      - alert: HighAttackRate
+        expr: attack_attempts_per_minute > 10
+        for: 2m
+        labels:
+          severity: high
+          category: soc
+          mitre_atlas: "AML.T0040"
+          slide: "17"
+        annotations:
+          summary: "{{ $value }} attack attempts/min"
+          description: "ATLAS AML.T0040 - Sustained attack campaign against ML inference API."
+
+      # Rule 22
+      - alert: DefenseEffectivenessLow
+        expr: defense_effectiveness < 50
+        for: 5m
+        labels:
+          severity: warning
+          category: soc
+          mitre_atlas: "AML.T0031"
+          slide: "17"
+        annotations:
+          summary: "Defense effectiveness {{ $value }}% — below 50% threshold"
+          description: "ATLAS AML.T0031 - Defenses failing. Attacker may be adapting to bypass controls."
+
+      # Rule 23
+      - alert: DefenseResponseTimeSlow
+        expr: histogram_quantile(0.95, rate(defense_response_time_seconds_bucket[5m])) > 2.0
+        for: 3m
+        labels:
+          severity: warning
+          category: soc
+          slide: "17"
+        annotations:
+          summary: "Defense response P95 latency {{ $value }}s (>2s threshold)"
+          description: "Slow defense response allows more attack damage before mitigation."
+
+      # Rule 24
+      - alert: SecurityLevelDegraded
+        expr: llm_security_level < 2
+        for: 1m
+        labels:
+          severity: high
+          category: soc
+          slide: "17"
+        annotations:
+          summary: "Security level degraded to {{ $value }} (expected >=2)"
+          description: "Security controls are in a degraded state."
+
+      # Rule 25
+      - alert: SessionRiskScoreCritical
+        expr: session_risk_score > 80
+        for: 0m
+        labels:
+          severity: critical
+          category: soc
+          mitre_atlas: "AML.T0042"
+          slide: "17"
+        annotations:
+          summary: "Session risk score {{ $value }}/100"
+          description: "ATLAS AML.T0042 - Single session showing critical risk. Likely active attack."
+
+      # Rule 26
+      - alert: AttackSuccessRateHigh
+        expr: attack_success_rate > 25
+        for: 3m
+        labels:
+          severity: critical
+          category: soc
+          mitre_atlas: "AML.T0042"
+          slide: "17"
+        annotations:
+          summary: "Attack success rate {{ $value }}% (>25% threshold)"
+          description: "ATLAS AML.T0042 - Attacks succeeding at high rate. Defense posture inadequate."
+
+      # Rule 27
+      - alert: TokenAnalysisVolumeAnomaly
+        expr: rate(tokens_analyzed_total[5m]) > 3 * rate(tokens_analyzed_total[1h])
+        for: 2m
+        labels:
+          severity: warning
+          category: soc
+          mitre_atlas: "AML.T0040"
+          slide: "17"
+        annotations:
+          summary: "Token analysis volume 3x above baseline"
+          description: "ATLAS AML.T0040 - Abnormal request volume may indicate automated attack tooling."

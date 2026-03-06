@@ -1,0 +1,200 @@
+# LLM Security Monitoring Alerts
+# Pattern 3: Prompt injection, jailbreaks, and agent attacks
+#
+# Reference: FOSDEM 2026 - AI Security Monitoring
+# Reference: OWASP Top 10 for LLM Applications 2024
+# Author: Samuel Desseaux <samuel@erythix.tech>
+
+groups:
+  - name: llm_security_monitoring
+    interval: 15s
+    rules:
+      # ============================================
+      # PROMPT INJECTION (OWASP LLM01)
+      # ============================================
+
+      # Alert: High confidence prompt injection detected
+      # Using ProtectAI/deberta-v3-base-prompt-injection or similar
+      - alert: PromptInjectionDetected
+        expr: |
+          llm_prompt_injection_score > 0.85
+        for: 0s
+        labels:
+          severity: critical
+          category: injection
+          owasp: LLM01
+        annotations:
+          summary: "Prompt injection detected (confidence: {{ $value | printf \"%.0f%%\" }})"
+          description: |
+            High confidence prompt injection attempt on {{ $labels.app }}.
+            User: {{ $labels.user_id }}
+            Injection classifier score: {{ $value | printf "%.2f" }}
+          runbook_url: "https://github.com/erythix/ml-security-monitoring/docs/runbooks/injection.md"
+
+      # Alert: Indirect injection via retrieved content
+      - alert: IndirectInjectionSuspected
+        expr: |
+          llm_rag_content_injection_score > 0.7
+        for: 0s
+        labels:
+          severity: warning
+          category: injection
+          owasp: LLM01
+        annotations:
+          summary: "Indirect injection in RAG content on {{ $labels.app }}"
+          description: |
+            Retrieved document may contain injection payload.
+            Source: {{ $labels.source_url }}
+
+      # ============================================
+      # SYSTEM PROMPT EXTRACTION (OWASP LLM07)
+      # ============================================
+
+      # Alert: User prompt similar to system prompt
+      - alert: SystemPromptExtractionAttempt
+        expr: |
+          llm_prompt_similarity_to_system > 0.7
+          OR llm_output_contains_system_prompt == 1
+        for: 0s
+        labels:
+          severity: critical
+          category: extraction
+          owasp: LLM07
+        annotations:
+          summary: "System prompt extraction attempt on {{ $labels.app }}"
+          description: |
+            User attempting to extract system prompt.
+            Similarity score: {{ $value | printf "%.2f" }}
+            User: {{ $labels.user_id }}
+
+      # Alert: Output leaking system instructions
+      - alert: SystemPromptLeakage
+        expr: |
+          llm_output_system_prompt_similarity > 0.8
+        for: 0s
+        labels:
+          severity: critical
+          category: extraction
+          owasp: LLM07
+        annotations:
+          summary: "System prompt leaked in output on {{ $labels.app }}"
+          description: |
+            Model output contains content similar to system prompt.
+            Immediate review required.
+
+      # ============================================
+      # JAILBREAK DETECTION (OWASP LLM01)
+      # ============================================
+
+      # Alert: Known jailbreak pattern detected
+      - alert: JailbreakPatternDetected
+        expr: |
+          llm_jailbreak_classifier_score > 0.8
+        for: 0s
+        labels:
+          severity: critical
+          category: jailbreak
+          owasp: LLM01
+        annotations:
+          summary: "Jailbreak attempt on {{ $labels.app }}"
+          description: |
+            Known jailbreak pattern detected.
+            Pattern type: {{ $labels.pattern_type }}
+            User: {{ $labels.user_id }}
+
+      # Alert: Safety guardrail bypass
+      - alert: SafetyGuardrailBypassed
+        expr: |
+          llm_output_policy_violations_total > 0
+          AND llm_safety_filter_triggered == 0
+        for: 0s
+        labels:
+          severity: critical
+          category: jailbreak
+          owasp: LLM01
+        annotations:
+          summary: "Safety guardrail bypassed on {{ $labels.app }}"
+          description: |
+            Policy violation in output but safety filter did not trigger.
+            Review prompt patterns for new jailbreak technique.
+
+      # ============================================
+      # AGENT/TOOL SECURITY (OWASP LLM08)
+      # ============================================
+
+      # Alert: Suspicious tool usage pattern
+      - alert: SuspiciousToolUsage
+        expr: |
+          sum by (user_id) (rate(llm_tool_calls_total{tool=~"shell|exec|write|delete|admin"}[5m])) > 5
+        for: 1m
+        labels:
+          severity: critical
+          category: agent
+          owasp: LLM08
+        annotations:
+          summary: "Suspicious tool usage by user {{ $labels.user_id }}"
+          description: |
+            User {{ $labels.user_id }} making excessive calls to sensitive tools.
+            Rate: {{ $value | printf "%.1f" }}/min
+
+      # Alert: Tool chain depth exceeded
+      - alert: ExcessiveToolChaining
+        expr: |
+          llm_tool_chain_depth > 5
+        for: 0s
+        labels:
+          severity: warning
+          category: agent
+          owasp: LLM08
+        annotations:
+          summary: "Excessive tool chaining on {{ $labels.app }}"
+          description: |
+            Tool chain depth {{ $value }} exceeds safe limit.
+            May indicate agent manipulation attack.
+
+      # Alert: Unauthorized tool access attempt
+      - alert: UnauthorizedToolAccess
+        expr: |
+          increase(llm_tool_access_denied_total[5m]) > 3
+        for: 0s
+        labels:
+          severity: warning
+          category: agent
+          owasp: LLM08
+        annotations:
+          summary: "Unauthorized tool access attempts on {{ $labels.app }}"
+          description: |
+            User {{ $labels.user_id }} attempted to access restricted tools.
+            Denied attempts: {{ $value }}
+
+      # ============================================
+      # RATE LIMITING & ABUSE
+      # ============================================
+
+      # Alert: Token usage spike
+      - alert: TokenUsageSpike
+        expr: |
+          sum by (user_id) (rate(llm_tokens_total[5m])) > 10000
+        for: 5m
+        labels:
+          severity: warning
+          category: abuse
+        annotations:
+          summary: "High token usage by {{ $labels.user_id }}"
+          description: |
+            User consuming {{ $value | printf "%.0f" }} tokens/min.
+            May indicate automated abuse.
+
+      # Alert: Conversation bombing
+      - alert: ConversationBombing
+        expr: |
+          rate(llm_conversations_created_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+          category: abuse
+        annotations:
+          summary: "Conversation bombing from {{ $labels.user_id }}"
+          description: |
+            User creating {{ $value | printf "%.0f" }} conversations/min.
+            Possible DoS or context pollution attack.
